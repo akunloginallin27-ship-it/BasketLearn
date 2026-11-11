@@ -3689,21 +3689,8 @@ var CONTOH_GERAK=[]; /* isi: {judul:'Dribbling rendah',src:'video/rendah.mp4'} l
  var t=document.getElementById('tab-teknik');
  t.insertAdjacentHTML('afterbegin','<div class="info-card"><h3>🎥 Contoh Gerak</h3>'+CONTOH_GERAK.map(function(v){return '<p style="margin-top:10px"><strong>'+escH(v.judul)+'</strong></p><video controls playsinline preload="none" style="width:100%;border-radius:10px" src="'+escH(v.src)+'"></video>'}).join('')+'</div>');
 })();
-function kodeCek(t){var h=0;for(var i=0;i<t.length;i++)h=(h*31+t.charCodeAt(i))%99991;return h.toString(36)}
-function buatKode(e){var b=btoa(unescape(encodeURIComponent(JSON.stringify({n:e.nama,k:e.kelas,v:e.nilai,w:e.waktu}))));return 'BL1-'+b+'-'+kodeCek(b)}
-function bacaKode(c){var m=c.match(/^BL1-([A-Za-z0-9+\/=]+)-([0-9a-z]+)$/);if(!m||kodeCek(m[1])!==m[2])return null;var o;try{o=JSON.parse(decodeURIComponent(escape(atob(m[1]))))}catch(x){return null}
- if(typeof o.n!=='string'||!o.n.trim()||o.n.length>60||!/^XI [A-I]$/.test(o.k)||!Number.isInteger(o.v)||o.v<0||o.v>100||typeof o.w!=='string')return null;
- return {nama:o.n.trim(),kelas:o.k,nilai:o.v,grade:getGrade(o.v),waktu:o.w.slice(0,40)}}
-function renderKode(e){var box=document.getElementById('kode-box');if(!box){box=document.createElement('div');box.id='kode-box';box.style.cssText='width:100%;max-width:340px;margin:0 auto 18px;text-align:left';var b=document.querySelector('#kuis-result .btn-primary');b.parentNode.insertBefore(box,b)}
- box.innerHTML='<div style="font-size:12px;font-weight:700;margin-bottom:6px">Kode Hasil (kirim ke guru)</div><textarea id="kode-teks" readonly rows="3" style="width:100%;border:1px solid #D5DDD7;border-radius:10px;padding:8px;font-family:monospace;font-size:11px"></textarea><button class="gd-exp" style="margin-top:8px" onclick="salinKode()">Salin kode</button>';
- document.getElementById('kode-teks').value=buatKode(e)}
-function salinKode(){var t=document.getElementById('kode-teks');t.select();try{navigator.clipboard.writeText(t.value)}catch(x){document.execCommand('copy')}}
-var _sr=showResult;showResult=function(){_sr();renderKode(allScores[allScores.length-1])};
-function imporKode(){var ok=0,dup=0,bad=0;document.getElementById('gd-kode').value.split(/\s+/).filter(Boolean).forEach(function(l){var e=bacaKode(l);if(!e){bad++;return}
- if(allScores.some(function(s){return s.nama===e.nama&&s.kelas===e.kelas&&s.nilai===e.nilai&&s.waktu===e.waktu})){dup++;return}allScores.push(e);ok++});
- lsSet('pjok_basket_scores',allScores);buildGuruDashboard();document.getElementById('gd-impor-msg').textContent=ok+' kode diimpor, '+dup+' duplikat, '+bad+' ditolak.'}
 var _cr=clearRekap;clearRekap=function(){var n=allScores.length;_cr();if(n>0&&allScores.length===0)buildGuruDashboard()};
-document.getElementById('gd-tabel').insertAdjacentHTML('beforebegin','<section class="gd-card" id="gd-impor"><h3>Impor Nilai dari Siswa <small>Kode Hasil</small></h3><p style="font-size:12.5px;color:#566860;margin-bottom:10px">Minta siswa menyalin &quot;Kode Hasil&quot; di akhir kuis, lalu tempel di sini (satu kode per baris).</p><textarea id="gd-kode" rows="4" style="width:100%;border:1px solid #D5DDD7;border-radius:10px;padding:10px;font-family:monospace;font-size:12px"></textarea><div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap"><button class="gd-exp" onclick="imporKode()">Impor</button><button class="gd-exp" style="background:#fff;color:#B91C1C;border:1px solid #B91C1C" onclick="clearRekap()">Hapus semua nilai</button></div><div id="gd-impor-msg" style="font-size:12px;margin-top:8px;color:#17402F"></div></section>');
+
 </script>
 <script>
 /* ═══ DATABASE: Google Sheets via Apps Script ═══
@@ -3718,7 +3705,7 @@ function dbPost(obj){
 }
 function dbStatus(t,warn){
  var box=document.getElementById('db-status');
- if(!box){var k=document.getElementById('kode-box');var b=document.querySelector('#kuis-result .btn-primary');if(!b)return;
+ if(!box){var k=null;var b=document.querySelector('#kuis-result .btn-primary');if(!b)return;
   box=document.createElement('div');box.id='db-status';box.style.cssText='width:100%;max-width:340px;margin:0 auto 14px;font-size:12px;font-weight:600;text-align:left';
   b.parentNode.insertBefore(box,k||b)}
  box.style.color=warn?'#B45309':'#17402F';box.textContent=t;
@@ -3733,7 +3720,7 @@ function dbFlush(){
  });
  return p.then(function(){
   lsSet(QKEY,sisa);_dbFlushing=false;
-  if(sisa.length)dbStatus('Nilai belum terkirim ke guru. Akan dicoba lagi otomatis saat ada internet. Salin Kode Hasil di bawah sebagai cadangan.',true);
+  if(sisa.length)dbStatus('Nilai belum terkirim ke guru. Akan dicoba lagi otomatis saat ada internet. Jangan hapus data browser dulu.',true);
   else dbStatus('Nilai sudah tersimpan di database guru.');
  });
 }
@@ -3769,8 +3756,8 @@ function dbTarik(){
  }).catch(function(err){msg.style.color='#B91C1C';msg.textContent='Gagal: '+err.message});
 }
 (function(){
- var t=document.getElementById('gd-impor');if(!t)return;
- t.insertAdjacentHTML('beforebegin','<section class="gd-card" id="gd-db"><h3>Database Nilai <small>Google Sheets</small></h3><p style="font-size:12.5px;color:#566860;margin-bottom:10px">Nilai siswa masuk otomatis ke spreadsheet. Tekan tombol ini untuk memuat semua nilai ke dashboard.</p><button class="gd-exp" onclick="dbTarik()">Muat nilai dari database</button><div id="db-msg" style="font-size:12px;margin-top:8px"></div></section>');
+ var t=document.getElementById('gd-tabel');if(!t)return;
+ t.insertAdjacentHTML('beforebegin','<section class="gd-card" id="gd-db"><h3>Database Nilai <small>Google Sheets</small></h3><p style="font-size:12.5px;color:#566860;margin-bottom:10px">Nilai siswa masuk otomatis ke spreadsheet. Tekan tombol ini untuk memuat semua nilai ke dashboard.</p><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="gd-exp" onclick="dbTarik()">Muat nilai dari database</button><button class="gd-exp" style="background:#fff;color:#B91C1C;border:1px solid #B91C1C" onclick="clearRekap()">Hapus data di perangkat ini</button></div><div id="db-msg" style="font-size:12px;margin-top:8px"></div></section>');
 })();
 </script>
 </body>
