@@ -3705,5 +3705,73 @@ function imporKode(){var ok=0,dup=0,bad=0;document.getElementById('gd-kode').val
 var _cr=clearRekap;clearRekap=function(){var n=allScores.length;_cr();if(n>0&&allScores.length===0)buildGuruDashboard()};
 document.getElementById('gd-tabel').insertAdjacentHTML('beforebegin','<section class="gd-card" id="gd-impor"><h3>Impor Nilai dari Siswa <small>Kode Hasil</small></h3><p style="font-size:12.5px;color:#566860;margin-bottom:10px">Minta siswa menyalin &quot;Kode Hasil&quot; di akhir kuis, lalu tempel di sini (satu kode per baris).</p><textarea id="gd-kode" rows="4" style="width:100%;border:1px solid #D5DDD7;border-radius:10px;padding:10px;font-family:monospace;font-size:12px"></textarea><div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap"><button class="gd-exp" onclick="imporKode()">Impor</button><button class="gd-exp" style="background:#fff;color:#B91C1C;border:1px solid #B91C1C" onclick="clearRekap()">Hapus semua nilai</button></div><div id="gd-impor-msg" style="font-size:12px;margin-top:8px;color:#17402F"></div></section>');
 </script>
+<script>
+/* ═══ DATABASE: Google Sheets via Apps Script ═══
+   Tempel URL Web App di SHEET_URL (lihat panduan setup). */
+var SHEET_URL='https://script.google.com/macros/s/AKfycbx5EouejHuS-NsX9TG3Njxai7w1xr0TClON9UH0Kj5h6uOGgggpVhiXMKq6g_HBonTL/exec';
+var QKEY='pjok_basket_queue';
+function dbOn(){return /^https:\/\/script\.google\.com\/macros\/s\/[^\s]+\/exec$/.test(SHEET_URL)}
+function dbQueue(){return lsGet(QKEY,'[]')}
+function dbPost(obj){
+ return fetch(SHEET_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(obj)})
+  .then(function(r){return r.json()});
+}
+function dbStatus(t,warn){
+ var box=document.getElementById('db-status');
+ if(!box){var k=document.getElementById('kode-box');var b=document.querySelector('#kuis-result .btn-primary');if(!b)return;
+  box=document.createElement('div');box.id='db-status';box.style.cssText='width:100%;max-width:340px;margin:0 auto 14px;font-size:12px;font-weight:600;text-align:left';
+  b.parentNode.insertBefore(box,k||b)}
+ box.style.color=warn?'#B45309':'#17402F';box.textContent=t;
+}
+var _dbFlushing=false;
+function dbFlush(){
+ if(!dbOn()||_dbFlushing)return Promise.resolve();
+ var q=dbQueue();if(!q.length)return Promise.resolve();
+ _dbFlushing=true;var sisa=[],p=Promise.resolve();
+ q.forEach(function(e){
+  p=p.then(function(){return dbPost(e)}).then(function(j){if(!j.ok&&!j.drop)throw new Error(j.error||'gagal')}).catch(function(){sisa.push(e)});
+ });
+ return p.then(function(){
+  lsSet(QKEY,sisa);_dbFlushing=false;
+  if(sisa.length)dbStatus('Nilai belum terkirim ke guru. Akan dicoba lagi otomatis saat ada internet. Salin Kode Hasil di bawah sebagai cadangan.',true);
+  else dbStatus('Nilai sudah tersimpan di database guru.');
+ });
+}
+var _srDb=showResult;
+showResult=function(){
+ _srDb();
+ if(!dbOn())return;
+ var e=allScores[allScores.length-1];if(!e)return;
+ var q=dbQueue();q.push(e);lsSet(QKEY,q);
+ dbStatus('Mengirim nilai ke database...');
+ dbFlush();
+};
+window.addEventListener('online',dbFlush);
+window.addEventListener('load',function(){setTimeout(dbFlush,1500)});
+
+/* Guru: tarik semua nilai dari database */
+function dbTarik(){
+ var msg=document.getElementById('db-msg');
+ if(!dbOn()){msg.style.color='#B91C1C';msg.textContent='URL database belum diisi di file (SHEET_URL).';return}
+ var pin=prompt('Masukkan PIN database guru');if(pin===null)return;
+ msg.style.color='#17402F';msg.textContent='Mengambil data...';
+ dbPost({aksi:'ambil',pin:pin}).then(function(j){
+  if(!j.ok)throw new Error(j.error||'gagal');
+  var ok=0,dup=0;
+  j.data.forEach(function(e){
+   if(!e||typeof e.nama!=='string'||!/^XI [A-I]$/.test(e.kelas)||!Number.isInteger(e.nilai))return;
+   e.grade=getGrade(e.nilai);
+   if(allScores.some(function(s){return s.nama===e.nama&&s.kelas===e.kelas&&s.nilai===e.nilai&&s.waktu===e.waktu})){dup++;return}
+   allScores.push(e);ok++;
+  });
+  lsSet('pjok_basket_scores',allScores);buildGuruDashboard();
+  var m=document.getElementById('db-msg');if(m){m.style.color='#17402F';m.textContent=ok+' nilai baru dimuat, '+dup+' sudah ada.'}
+ }).catch(function(err){msg.style.color='#B91C1C';msg.textContent='Gagal: '+err.message});
+}
+(function(){
+ var t=document.getElementById('gd-impor');if(!t)return;
+ t.insertAdjacentHTML('beforebegin','<section class="gd-card" id="gd-db"><h3>Database Nilai <small>Google Sheets</small></h3><p style="font-size:12.5px;color:#566860;margin-bottom:10px">Nilai siswa masuk otomatis ke spreadsheet. Tekan tombol ini untuk memuat semua nilai ke dashboard.</p><button class="gd-exp" onclick="dbTarik()">Muat nilai dari database</button><div id="db-msg" style="font-size:12px;margin-top:8px"></div></section>');
+})();
+</script>
 </body>
 </html>
