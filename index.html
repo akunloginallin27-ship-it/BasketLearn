@@ -1175,7 +1175,7 @@ body {
 .gl-sec{padding:72px 6vw 0}
 .gl-eyebrow{font-size:12px;color:#6A7A72;margin-bottom:6px}
 .gl-sec h2{font-size:28px;font-weight:800;letter-spacing:-.01em}
-.gl-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:26px}
+.gl-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:26px}
 .gl-svc{background:#fff;border:1px solid #E3E8E2;border-radius:14px;padding:20px 18px;cursor:pointer;transition:.2s}
 .gl-svc:hover{border-color:#17402F;transform:translateY(-3px)}
 .gl-svc .ic{width:38px;height:38px;border-radius:10px;background:#EAF2EC;display:grid;place-items:center;font-size:19px;margin-bottom:14px}
@@ -1193,7 +1193,7 @@ body {
 .gl-stats .n{font-size:40px;font-weight:800;color:#fff;letter-spacing:-.02em}
 .gl-stats .l{font-size:12px;color:#B6CCBF;margin-top:4px}
 .gl-foot{padding:36px 6vw;color:#6A7A72;font-size:12px;text-align:center}
-@media(max-width:900px){.gl-grid{grid-template-columns:1fr;gap:34px;padding-top:34px}.gl-cards{grid-template-columns:1fr 1fr}.gl-about{grid-template-columns:1fr;gap:28px}.gl-stats{grid-template-columns:1fr 1fr 1fr}.gl-stats .first{grid-column:1/-1}}
+@media(max-width:900px){.gl-grid{grid-template-columns:1fr;gap:34px;padding-top:34px}.gl-cards{grid-template-columns:1fr}.gl-about{grid-template-columns:1fr;gap:28px}.gl-stats{grid-template-columns:1fr 1fr 1fr}.gl-stats .first{grid-column:1/-1}}
 @media(max-width:560px){.gl-links a:not(.gl-cta){display:none}.gl-cards{grid-template-columns:1fr}.gl-stats>div{padding:22px 16px}.gl-stats .n{font-size:30px}.gl-sec{padding-top:52px}}
 </style>
 <header class="gl-hero">
@@ -1215,7 +1215,6 @@ body {
   <div class="gl-svc" onclick="glNeed()"><div class="ic">📖</div><b>Materi</b><span>Pengertian, jenis, teknik, dan kesalahan umum dribbling, lengkap dengan diagram postur.</span></div>
   <div class="gl-svc" onclick="glNeed()"><div class="ic">🎯</div><b>Latihan &amp; Tantangan</b><span>Pilih tantangan video atau game dribbling, dengan checklist dan rubrik penilaian.</span></div>
   <div class="gl-svc" onclick="glNeed()"><div class="ic">✏️</div><b>Kuis</b><span>Soal pilihan ganda dengan umpan balik langsung dan review jawaban di akhir.</span></div>
-  <div class="gl-svc" onclick="glNeed()"><div class="ic">📊</div><b>Rekap Nilai</b><span>Lihat nilai kuis dan peringkat yang tersimpan di perangkat ini.</span></div>
  </div></section>
 <section class="gl-sec gl-about" id="gl-tentang"><div class="gl-vis"><svg viewBox="0 0 300 170" role="img" aria-label="Lapangan basket" fill="none" stroke="#F5B82E" stroke-width="2" stroke-linejoin="round">
 <g fill="rgba(245,184,46,.14)"><rect x="10" y="60.5" width="58" height="49"/><rect x="232" y="60.5" width="58" height="49"/></g>
@@ -1267,7 +1266,6 @@ function glNeed(){window.scrollTo({top:0,behavior:'smooth'});setTimeout(function
         <li><strong>Materi</strong> (±15–20 menit): baca tiap tab dari kiri ke kanan</li>
         <li><strong>Kuis</strong> (±5–10 menit): kerjakan setelah membaca materi</li>
         <li><strong>Latihan &amp; Tantangan</strong>: tantangan video atau game bersama kelompok sesuai jadwal dari guru</li>
-        <li><strong>Rekap Nilai</strong>: hasil kuis yang tersimpan di perangkat ini</li>
       </ul>
       <p style="font-size:12px;color:#6A7A72;margin-top:6px;">Waktu di atas hanya perkiraan.</p>
     </div>
@@ -1284,15 +1282,10 @@ function glNeed(){window.scrollTo({top:0,behavior:'smooth'});setTimeout(function
         <div class="menu-desc">Pilih tantangan video atau game dribbling</div>
         <div class="menu-badge-new">NEW</div>
       </div>
-      <div class="menu-card" onclick="goScreen('screen-kuis')">
+      <div class="menu-card" style="grid-column:1/-1" onclick="goScreen('screen-kuis')">
         <div class="menu-icon">✏️</div>
         <div class="menu-label">Kuis</div>
         <div class="menu-desc">Uji pemahamanmu dengan soal interaktif</div>
-      </div>
-      <div class="menu-card" onclick="goScreen('screen-rekap')">
-        <div class="menu-icon">📊</div>
-        <div class="menu-label">Rekap Nilai</div>
-        <div class="menu-desc">Lihat nilai kuis di perangkat ini</div>
       </div>
     </div>
 
@@ -2503,45 +2496,6 @@ function glNeed(){window.scrollTo({top:0,behavior:'smooth'});setTimeout(function
 </div>
 
 <!-- ══════════════════ SCREEN: REKAP (IMPROVED) ══════════════════ -->
-<div id="screen-rekap" class="screen">
-  <div class="topbar">
-    <button class="btn-back" onclick="goBack()">←</button>
-    <div style="flex:1;text-align:center;font-family:'Syne',sans-serif;font-weight:700;">Rekap Nilai Kuis</div>
-    <div style="width:40px;"></div>
-  </div>
-
-  <!-- Nilai saya -->
-  <div id="rekap-my-score-wrap" style="display:none;padding-top:16px;">
-    <div class="rekap-my-score">
-      <div class="rekap-my-circle">
-        <div class="rekap-my-val" id="rekap-my-val">–</div>
-        <div class="rekap-my-lbl">Nilai</div>
-      </div>
-      <div class="rekap-my-info">
-        <h4 id="rekap-my-nama">–</h4>
-        <p id="rekap-my-kelas">–</p>
-        <p id="rekap-my-grade" style="margin-top:4px;"></p>
-      </div>
-      <div class="rekap-rank-badge" id="rekap-my-rank">#–</div>
-    </div>
-  </div>
-
-  <!-- Filter kelas -->
-  <div class="rekap-header-bar">
-    <span style="font-size:13px;color:var(--gray);">Semua peserta</span>
-    
-  </div>
-  <div class="filter-bar" style="padding:8px 20px 0;" id="rekap-filter-bar">
-    <button class="filter-chip active" onclick="filterRekap('semua',this)">Semua</button>
-  </div>
-
-  <div class="rekap-list has-bottom-nav" id="rekap-list">
-    <div class="info-card" style="text-align:center;">
-      <p style="color:var(--gray);">Belum ada nilai kuis.<br>Selesaikan kuis untuk melihat hasil!</p>
-    </div>
-  </div>
-</div>
-
 <!-- ══════════════════ SCREEN: GURU LOGIN ══════════════════ -->
 <div id="screen-guru-login" class="screen">
   <div style="background:linear-gradient(135deg,#EAF2EC,#DDEBE2);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;">
@@ -2674,7 +2628,6 @@ function glNeed(){window.scrollTo({top:0,behavior:'smooth'});setTimeout(function
     <span class="nav-icon">✏️</span><span class="nav-label">Kuis</span>
   </button>
   <button class="nav-item" onclick="navTo('video',this)"><span class="nav-icon">🎬</span><span class="nav-label">Video</span></button>
-  <button class="nav-item" onclick="navTo('rekap',this)"><span class="nav-icon">📊</span><span class="nav-label">Rekap</span></button>
 </nav>
 
 <div class="watermark" id="watermark">© Nurul Habibah / PJKR 2023 B · v1.4</div>
@@ -3677,7 +3630,7 @@ var _gs=goScreen;goScreen=function(id){_gs(id);if(id==='screen-materi'){viewedTa
 toggleFase=function(card){if(window.event&&window.event.target&&window.event.target.closest('.fase-body'))return;card.classList.toggle('open')};
 </script>
 <style>
-.bottom-nav{grid-template-columns:repeat(6,1fr)}
+.bottom-nav{grid-template-columns:repeat(5,1fr)}
 .content-area,.home-section,.rekap-list{max-width:880px;margin-left:auto;margin-right:auto;width:100%}
 #kuis-start,#kuis-result .result-screen{max-width:880px;margin-left:auto;margin-right:auto;width:100%}
 .gd-exp{background:#17402F}
@@ -3695,7 +3648,7 @@ var _cr=clearRekap;clearRekap=function(){var n=allScores.length;_cr();if(n>0&&al
 <script>
 /* ═══ DATABASE: Google Sheets via Apps Script ═══
    Tempel URL Web App di SHEET_URL (lihat panduan setup). */
-var SHEET_URL='https://script.google.com/macros/s/AKfycbx5EouejHuS-NsX9TG3Njxai7w1xr0TClON9UH0Kj5h6uOGgggpVhiXMKq6g_HBonTL/exec';
+var SHEET_URL='';
 var QKEY='pjok_basket_queue';
 function dbOn(){return /^https:\/\/script\.google\.com\/macros\/s\/[^\s]+\/exec$/.test(SHEET_URL)}
 function dbQueue(){return lsGet(QKEY,'[]')}
