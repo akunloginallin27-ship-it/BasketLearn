@@ -2038,6 +2038,47 @@ function glNeed(){window.scrollTo({top:0,behavior:'smooth'});setTimeout(function
   </div>
   <div class="content-area has-bottom-nav">
 
+<!-- VIDEO DEMONSTRASI DRIBBLING -->
+<div class="vg-card">
+  <div class="vg-card-header">
+    🏀 Video Demonstrasi Teknik Dribbling
+  </div>
+
+  <div class="vg-card-body">
+
+    <p class="video-description">
+      Amati demonstrasi teknik dribbling bola basket berikut
+      untuk membantu memahami gerakan dan kontrol bola.
+    </p>
+
+    <div class="video-responsive">
+      <video controls preload="metadata" playsinline>
+        <source
+          src="videos/dribbling-dasar.webm"
+          type="video/webm"
+        >
+        Browser kamu tidak mendukung pemutar video.
+      </video>
+    </div>
+
+    <div class="video-source">
+      <strong>Sumber Video:</strong> Mart570 – Wikimedia Commons.
+      <br>
+      Lisensi:
+      <a
+        href="https://creativecommons.org/licenses/by-sa/3.0/"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        Creative Commons Attribution-ShareAlike 3.0
+      </a>.
+    </div>
+
+  </div>
+</div>
+<!-- AKHIR VIDEO DEMONSTRASI -->
+
+    
     <div class="vg-card">
       <div class="vg-card-header">📱 Peralatan yang Dibutuhkan</div>
       <div class="vg-card-body">
@@ -3392,6 +3433,55 @@ toggleFase=function(card){if(window.event&&window.event.target&&window.event.tar
 .rv-tag.no{background:#FEE2E2;color:#B91C1C}
 .rv-note{font-size:12px;color:#B45309;background:#FEF3C7;border-radius:8px;padding:6px 10px;margin-bottom:8px}
 @media(max-width:560px){.review-ans{flex-wrap:wrap}.rv-tag{margin-left:26px}}
+
+/* VIDEO DEMONSTRASI BASKETLEARN */
+.video-description {
+  color: var(--gray);
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 14px;
+}
+
+.video-responsive {
+  width: 100%;
+  max-width: 850px;
+  margin: 0 auto;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.video-responsive video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.video-source {
+  margin-top: 12px;
+  color: var(--gray);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.video-source a {
+  color: var(--orange);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .video-responsive {
+    border-radius: 10px;
+  }
+
+  .video-description {
+    font-size: 12px;
+  }
+}
 </style>
 <script>
 var CONTOH_GERAK=[]; /* isi: {judul:'Dribbling rendah',src:'video/rendah.mp4'} lalu simpan videonya di folder yang sama */
