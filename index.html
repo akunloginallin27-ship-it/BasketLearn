@@ -3158,19 +3158,24 @@ function buildReview() {
     const ua = userAnswers[qi];
     const letters = ['A','B','C','D'];
     const optsHtml = q.opts.map((o, oi) => {
-      let cls = 'neutral';
-      if (oi === q.ans) cls = 'correct';
-      else if (ua && ua.pick === oi && !ua.correct) cls = 'wrong-pick';
+      const picked = ua && ua.pick === oi;
+      let cls = 'neutral', tag = '';
+      if (oi === q.ans) {
+        cls = 'correct';
+        tag = picked ? '<span class="rv-tag ok">Jawabanmu (benar)</span>' : '<span class="rv-tag ok">Jawaban benar</span>';
+      } else if (picked) {
+        cls = 'wrong-pick';
+        tag = '<span class="rv-tag no">Jawabanmu</span>';
+      }
       return `<div class="review-ans ${cls}">
-        <strong style="flex-shrink:0;">${letters[oi]}.</strong> ${o}
-        ${oi === q.ans ? '<span style="margin-left:auto;color:#15803D;flex-shrink:0;">✓</span>' : ''}
-        ${ua && ua.pick === oi && !ua.correct ? '<span style="margin-left:auto;color:#B91C1C;flex-shrink:0;">✗</span>' : ''}
+        <strong style="flex-shrink:0;">${letters[oi]}.</strong><span class="rv-t">${o}</span>${tag}
       </div>`;
     }).join('');
     const icon = ua && ua.correct ? '✅' : (ua && ua.pick === -1 ? '⏰' : '❌');
+    const note = ua && ua.pick === -1 ? '<div class="rv-note">Waktu habis, soal ini belum kamu jawab.</div>' : '';
     return `<div class="review-card">
-      <div class="review-q">${icon} <strong>Soal ${qi+1}:</strong> ${q.q}</div>
-      ${optsHtml}
+      <div class="review-q"><span>${icon}</span><span><strong>Soal ${qi+1}:</strong> ${q.q}</span></div>
+      ${note}${optsHtml}
       <div class="review-fb">💡 ${q.fb}</div>
     </div>`;
   }).join('');
@@ -3634,6 +3639,17 @@ toggleFase=function(card){if(window.event&&window.event.target&&window.event.tar
 .content-area,.home-section,.rekap-list{max-width:880px;margin-left:auto;margin-right:auto;width:100%}
 #kuis-start,#kuis-result .result-screen{max-width:880px;margin-left:auto;margin-right:auto;width:100%}
 .gd-exp{background:#17402F}
+#kuis-result{flex-direction:column;align-items:center}
+#kuis-result>div{width:100%;max-width:880px}
+#kuis-result .result-screen{flex:none;padding-bottom:24px}
+.review-card{box-shadow:0 1px 3px rgba(15,42,32,.05)}
+.review-card .review-q{display:flex;gap:8px;align-items:flex-start}
+.review-ans span.rv-t{flex:1;min-width:0;line-height:1.5}
+.rv-tag{flex-shrink:0;align-self:center;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}
+.rv-tag.ok{background:#DCFCE7;color:#15803D}
+.rv-tag.no{background:#FEE2E2;color:#B91C1C}
+.rv-note{font-size:12px;color:#B45309;background:#FEF3C7;border-radius:8px;padding:6px 10px;margin-bottom:8px}
+@media(max-width:560px){.review-ans{flex-wrap:wrap}.rv-tag{margin-left:26px}}
 </style>
 <script>
 var CONTOH_GERAK=[]; /* isi: {judul:'Dribbling rendah',src:'video/rendah.mp4'} lalu simpan videonya di folder yang sama */
@@ -3648,7 +3664,7 @@ var _cr=clearRekap;clearRekap=function(){var n=allScores.length;_cr();if(n>0&&al
 <script>
 /* ═══ DATABASE: Google Sheets via Apps Script ═══
    Tempel URL Web App di SHEET_URL (lihat panduan setup). */
-var SHEET_URL='';
+var SHEET_URL='https://script.google.com/macros/s/AKfycbx5EouejHuS-NsX9TG3Njxai7w1xr0TClON9UH0Kj5h6uOGgggpVhiXMKq6g_HBonTL/exec';
 var QKEY='pjok_basket_queue';
 function dbOn(){return /^https:\/\/script\.google\.com\/macros\/s\/[^\s]+\/exec$/.test(SHEET_URL)}
 function dbQueue(){return lsGet(QKEY,'[]')}
