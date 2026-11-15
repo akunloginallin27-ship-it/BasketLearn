@@ -2568,12 +2568,14 @@ const questionBank = [
 
 let questions = [];
 function shuffleQuestions() {
-  const sh = a => [...a].sort(() => Math.random() - 0.5);
-  const pick = sh([...sh(questionBank.filter(q => q.lv === 'C3')).slice(0, 3), ...sh(questionBank.filter(q => q.lv !== 'C3')).slice(0, 7)]);
-  questions = pick.map(q => {
-    const idx = q.opts.map((_, i) => i).sort(() => Math.random() - 0.5);
-    return { q: q.q, fb: q.fb, opts: idx.map(i => q.opts[i]), ans: idx.indexOf(q.ans) };
-  });
+  // Menampilkan seluruh 20 soal dengan urutan tetap
+  // Pilihan jawaban juga tetap dan tidak diacak
+  questions = questionBank.map(q => ({
+    q: q.q,
+    fb: q.fb,
+    opts: [...q.opts],
+    ans: q.ans
+  }));
 }
 
 // ════════════════════════════════════
