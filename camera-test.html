@@ -214,16 +214,21 @@ handLandmarker = await HandLandmarker.createFromOptions(
 
         cameraStream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: "user",
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
+  facingMode: "user",
+  width: { ideal: 1920 },
+  height: { ideal: 1080 }
+},
           audio: false
         });
 
         video.srcObject = cameraStream;
         await video.play();
-
+console.log(
+  "Resolusi kamera:",
+  video.videoWidth,
+  "x",
+  video.videoHeight
+);
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
 
@@ -254,9 +259,7 @@ handLandmarker = await HandLandmarker.createFromOptions(
         startButton.disabled = false;
       }
     }
-
     
-
 function renderLoop() {
   if (!isRunning) return;
 
