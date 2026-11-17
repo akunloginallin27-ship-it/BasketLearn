@@ -130,10 +130,11 @@
 
   <script type="module">
     import {
-      FilesetResolver,
-      PoseLandmarker,
-      DrawingUtils
-    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs";
+  FilesetResolver,
+  PoseLandmarker,
+  ObjectDetector,
+  DrawingUtils
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs";
 
     const video = document.getElementById("webcam");
     const canvas = document.getElementById("output");
@@ -144,6 +145,7 @@
     const statusBox = document.getElementById("status");
 
     let poseLandmarker = null;
+    let objectDetector = null;
     let drawingUtils = null;
     let cameraStream = null;
     let animationId = null;
@@ -171,7 +173,20 @@
       );
 
       drawingUtils = new DrawingUtils(ctx);
-    }
+      objectDetector = await ObjectDetector.createFromOptions(
+  vision,
+  {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite",
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO",
+    scoreThreshold: 0.35,
+    maxResults: 10
+  }
+);
+}
 
     async function startCamera() {
       try {
@@ -193,9 +208,9 @@
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
 
-        if (!poseLandmarker) {
-          await initializeModel();
-        }
+        if (!poseLandmarker || !objectDetector) {
+           await initializeModel();
+      }
 
         isRunning = true;
         lastVideoTime = -1;
@@ -221,53 +236,109 @@
       }
     }
 
-    function renderLoop() {
-      if (!isRunning) return;
+    
+function renderLoop() {
+  if (!isRunning) return;
 
-      if (
-        video.readyState >= 2 &&
-        video.currentTime !== lastVideoTime
-      ) {
-        lastVideoTime = video.currentTime;
+  if (
+    video.readyState >= 2 &&
+    video.currentTime !== lastVideoTime
+  ) {
+    lastVideoTime = video.currentTime;
 
-        const result = poseLandmarker.detectForVideo(
-          video,
-          performance.now()
+    const timestamp = performance.now();
+
+    // DETEKSI TUBUH
+    const result = poseLandmarker.detectForVideo(
+      video,
+      timestamp
+    );
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    let bodyFound = false;
+    let ballFound = false;
+
+    if (result.landmarks && result.landmarks.length > 0) {
+      bodyFound = true;
+
+      for (const landmarks of result.landmarks) {
+        drawingUtils.drawConnectors(
+          landmarks,
+          PoseLandmarker.POSE_CONNECTIONS,
+          {
+            color: "#00FF88",
+            lineWidth: 4
+          }
         );
 
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        if (result.landmarks && result.landmarks.length > 0) {
-          for (const landmarks of result.landmarks) {
-            drawingUtils.drawConnectors(
-              landmarks,
-              PoseLandmarker.POSE_CONNECTIONS,
-              {
-                color: "#00FF88",
-                lineWidth: 4
-              }
-            );
-
-            drawingUtils.drawLandmarks(
-              landmarks,
-              {
-                color: "#FF3030",
-                lineWidth: 2,
-                radius: 4
-              }
-            );
+        drawingUtils.drawLandmarks(
+          landmarks,
+          {
+            color: "#FF3030",
+            lineWidth: 2,
+            radius: 4
           }
-
-          statusBox.textContent =
-            "Berhasil mendeteksi tubuh. Kerangka mengikuti gerakan.";
-        } else {
-          statusBox.textContent =
-            "Tubuh belum terdeteksi. Atur posisi kamera agar tubuh terlihat.";
-        }
+        );
       }
-
-      animationId = requestAnimationFrame(renderLoop);
     }
+
+    // DETEKSI BOLA
+    const objectResult = objectDetector.detectForVideo(
+      video,
+      timestamp
+    );
+
+    for (const detection of objectResult.detections) {
+      const category = detection.categories[0];
+
+      if (
+        category &&
+        category.categoryName.toLowerCase() === "sports ball"
+      ) {
+        const box = detection.boundingBox;
+
+        ctx.strokeStyle = "#FFD700";
+        ctx.lineWidth = 4;
+
+        ctx.strokeRect(
+          box.originX,
+          box.originY,
+          box.width,
+          box.height
+        );
+
+        ctx.fillStyle = "#FFD700";
+        ctx.font = "18px Arial";
+
+        ctx.fillText(
+          "BOLA " + Math.round(category.score * 100) + "%",
+          box.originX,
+          Math.max(20, box.originY - 8)
+        );
+
+        ballFound = true;
+      }
+    }
+
+    // STATUS SISTEM
+    if (bodyFound && ballFound) {
+      statusBox.textContent =
+        "Tubuh dan bola berhasil terdeteksi!";
+    } else if (bodyFound) {
+      statusBox.textContent =
+        "Tubuh terdeteksi. Bola belum ditemukan.";
+    } else if (ballFound) {
+      statusBox.textContent =
+        "Bola terdeteksi. Tubuh belum ditemukan.";
+    } else {
+      statusBox.textContent =
+        "Tubuh dan bola belum terdeteksi.";
+    }
+  }
+
+  animationId = requestAnimationFrame(renderLoop);
+}
 
     function stopCamera() {
       isRunning = false;
