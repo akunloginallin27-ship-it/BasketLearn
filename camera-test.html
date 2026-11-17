@@ -267,14 +267,14 @@ function renderLoop() {
     lastVideoTime = video.currentTime;
 
     const timestamp = performance.now();
+     ctx.setTransform(1, 0, 0, 1, 0, 0);
+     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // DETEKSI TUBUH
-    const result = poseLandmarker.detectForVideo(
-      video,
-      timestamp
-    );
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+// DETEKSI TUBUH
+const result = poseLandmarker.detectForVideo(
+  video,
+  timestamp
+);
 
     let bodyFound = false;
     let ballFound = false;
