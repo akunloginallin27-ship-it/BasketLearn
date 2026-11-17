@@ -306,6 +306,8 @@ const result = poseLandmarker.detectForVideo(
     }
 
     // DETEKSI TANGAN DAN JARI
+    
+    // DETEKSI TANGAN DAN JARI
     const handResult = handLandmarker.detectForVideo(
       video,
       timestamp
@@ -317,9 +319,68 @@ const result = poseLandmarker.detectForVideo(
     ) {
       handFound = true;
 
+      // Ambil kerangka tubuh yang sudah terdeteksi
+      const posePoints = result.landmarks?.[0];
+
       for (const hand of handResult.landmarks) {
 
-        // GARIS PERSENDIAN JARI
+        // TITIK PERGELANGAN TANGAN
+        const handWrist = hand[0];
+
+        // CARI PERGELANGAN TANGAN TERDEKAT
+        if (posePoints && handWrist) {
+
+          const wristCandidates = [
+            posePoints[15], // Pergelangan tangan kiri
+            posePoints[16]  // Pergelangan tangan kanan
+          ].filter(point =>
+            point &&
+            (point.visibility ?? 1) > 0.4
+          );
+
+          if (wristCandidates.length > 0) {
+
+            let nearestWrist = null;
+            let minDistance = Infinity;
+
+            for (const wrist of wristCandidates) {
+
+              const dx = wrist.x - handWrist.x;
+              const dy = wrist.y - handWrist.y;
+
+              const distance = Math.sqrt(
+                dx * dx + dy * dy
+              );
+
+              if (distance < minDistance) {
+                minDistance = distance;
+                nearestWrist = wrist;
+              }
+            }
+
+            // HUBUNGKAN JIKA POSISINYA CUKUP DEKAT
+            if (nearestWrist && minDistance < 0.20) {
+
+              ctx.beginPath();
+
+              ctx.moveTo(
+                nearestWrist.x * canvas.width,
+                nearestWrist.y * canvas.height
+              );
+
+              ctx.lineTo(
+                handWrist.x * canvas.width,
+                handWrist.y * canvas.height
+              );
+
+              ctx.strokeStyle = "#00FFFF";
+              ctx.lineWidth = 4;
+              ctx.stroke();
+            }
+          }
+        }
+
+        // GAMBAR GARIS PERSENDIAN JARI
         drawingUtils.drawConnectors(
           hand,
           HandLandmarker.HAND_CONNECTIONS,
@@ -329,14 +390,14 @@ const result = poseLandmarker.detectForVideo(
           }
         );
 
-        // TITIK-TITIK ANATOMI TANGAN
+        // GAMBAR TITIK ANATOMI TANGAN
         drawingUtils.drawLandmarks(
           hand,
           {
-            color: "#FF0000",
-            fillColor: "#FF0000",
+            color: "#FF3030",
+            fillColor: "#FF3030",
             lineWidth: 2,
-            radius: 5
+            radius: 4
           }
         );
       }
