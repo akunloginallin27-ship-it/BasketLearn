@@ -92,6 +92,21 @@
       color: #64746e;
       font-size: 13px;
     }
+    .camera-box:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.camera-box:fullscreen video,
+.camera-box:fullscreen canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
   </style>
 </head>
 
@@ -112,6 +127,7 @@
     <div class="controls">
       <button id="startButton">Aktifkan Kamera</button>
       <button id="stopButton" disabled>Matikan Kamera</button>
+      <button id="fullscreenBtn" onclick="toggleFullscreen()"> ⛶ Fullscreen</button>
     </div>
 
     <div id="status">
@@ -474,6 +490,32 @@
     stopButton.addEventListener("click", stopCamera);
 
     window.addEventListener("beforeunload", stopCamera);
+    async function toggleFullscreen() {
+  const cameraBox = document.querySelector(".camera-box");
+  const button = document.getElementById("fullscreenBtn");
+
+  if (!document.fullscreenElement) {
+    try {
+      await cameraBox.requestFullscreen();
+      button.textContent = "✕ Keluar Fullscreen";
+    } catch (error) {
+      console.error("Gagal membuka fullscreen:", error);
+    }
+  } else {
+    await document.exitFullscreen();
+    button.textContent = "⛶ Fullscreen";
+  }
+}
+
+document.addEventListener("fullscreenchange", () => {
+  const button = document.getElementById("fullscreenBtn");
+
+  if (button) {
+    button.textContent = document.fullscreenElement
+      ? "✕ Keluar Fullscreen"
+      : "⛶ Fullscreen";
+  }
+});
   </script>
 </body>
 </html>
