@@ -1,0 +1,300 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BasketLearn - Tes Kamera</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: Arial, sans-serif;
+      background: #f3f7f5;
+      color: #153d35;
+    }
+
+    .container {
+      max-width: 850px;
+      margin: auto;
+    }
+
+    h1 {
+      margin-bottom: 8px;
+    }
+
+    .description {
+      color: #52665f;
+      line-height: 1.6;
+    }
+
+    .camera-box {
+      position: relative;
+      width: 100%;
+      margin-top: 20px;
+      overflow: hidden;
+      border-radius: 14px;
+      background: #17211e;
+      min-height: 240px;
+    }
+
+    video {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+
+    button {
+      padding: 12px 20px;
+      border: 0;
+      border-radius: 8px;
+      background: #176b58;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    #stopButton {
+      background: #a33c3c;
+    }
+
+    #status {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 8px;
+      background: white;
+      line-height: 1.5;
+    }
+
+    .note {
+      margin-top: 14px;
+      color: #64746e;
+      font-size: 13px;
+    }
+  </style>
+</head>
+
+<body>
+  <main class="container">
+    <h1>BasketLearn – Tes Kamera</h1>
+
+    <p class="description">
+      Prototipe pendeteksi gerakan tubuh untuk tes
+      stationary dribbling.
+    </p>
+
+    <div class="camera-box">
+      <video id="webcam" autoplay playsinline muted></video>
+      <canvas id="output"></canvas>
+    </div>
+
+    <div class="controls">
+      <button id="startButton">Aktifkan Kamera</button>
+      <button id="stopButton" disabled>Matikan Kamera</button>
+    </div>
+
+    <div id="status">
+      Status: Kamera belum diaktifkan.
+    </div>
+
+    <p class="note">
+      Catatan: prototipe ini hanya mendeteksi kerangka tubuh.
+      Belum melakukan penilaian teknik atau menyimpan video.
+    </p>
+  </main>
+
+  <script type="module">
+    import {
+      FilesetResolver,
+      PoseLandmarker,
+      DrawingUtils
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs";
+
+    const video = document.getElementById("webcam");
+    const canvas = document.getElementById("output");
+    const ctx = canvas.getContext("2d");
+
+    const startButton = document.getElementById("startButton");
+    const stopButton = document.getElementById("stopButton");
+    const statusBox = document.getElementById("status");
+
+    let poseLandmarker = null;
+    let drawingUtils = null;
+    let cameraStream = null;
+    let animationId = null;
+    let isRunning = false;
+    let lastVideoTime = -1;
+
+    async function initializeModel() {
+      statusBox.textContent = "Memuat model deteksi tubuh...";
+
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
+      );
+
+      poseLandmarker = await PoseLandmarker.createFromOptions(
+        vision,
+        {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+            delegate: "GPU"
+          },
+          runningMode: "VIDEO",
+          numPoses: 1
+        }
+      );
+
+      drawingUtils = new DrawingUtils(ctx);
+    }
+
+    async function startCamera() {
+      try {
+        startButton.disabled = true;
+        statusBox.textContent = "Meminta izin kamera...";
+
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "user",
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+
+        video.srcObject = cameraStream;
+        await video.play();
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        if (!poseLandmarker) {
+          await initializeModel();
+        }
+
+        isRunning = true;
+        lastVideoTime = -1;
+
+        startButton.disabled = true;
+        stopButton.disabled = false;
+
+        statusBox.textContent =
+          "Kamera aktif. Silakan berdiri hingga tubuh terlihat.";
+
+        renderLoop();
+
+      } catch (error) {
+        console.error(error);
+
+        stopCamera();
+
+        statusBox.textContent =
+          "Gagal mengaktifkan kamera atau model. Periksa izin kamera dan koneksi internet. Detail: " +
+          error.message;
+
+        startButton.disabled = false;
+      }
+    }
+
+    function renderLoop() {
+      if (!isRunning) return;
+
+      if (
+        video.readyState >= 2 &&
+        video.currentTime !== lastVideoTime
+      ) {
+        lastVideoTime = video.currentTime;
+
+        const result = poseLandmarker.detectForVideo(
+          video,
+          performance.now()
+        );
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (result.landmarks && result.landmarks.length > 0) {
+          for (const landmarks of result.landmarks) {
+            drawingUtils.drawConnectors(
+              landmarks,
+              PoseLandmarker.POSE_CONNECTIONS,
+              {
+                color: "#00FF88",
+                lineWidth: 4
+              }
+            );
+
+            drawingUtils.drawLandmarks(
+              landmarks,
+              {
+                color: "#FF3030",
+                lineWidth: 2,
+                radius: 4
+              }
+            );
+          }
+
+          statusBox.textContent =
+            "Berhasil mendeteksi tubuh. Kerangka mengikuti gerakan.";
+        } else {
+          statusBox.textContent =
+            "Tubuh belum terdeteksi. Atur posisi kamera agar tubuh terlihat.";
+        }
+      }
+
+      animationId = requestAnimationFrame(renderLoop);
+    }
+
+    function stopCamera() {
+      isRunning = false;
+
+      if (animationId !== null) {
+        cancelAnimationFrame(animationId);
+        animationId = null;
+      }
+
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+      }
+
+      video.srcObject = null;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      startButton.disabled = false;
+      stopButton.disabled = true;
+
+      statusBox.textContent = "Kamera telah dimatikan.";
+    }
+
+    startButton.addEventListener("click", startCamera);
+    stopButton.addEventListener("click", stopCamera);
+
+    window.addEventListener("beforeunload", stopCamera);
+  </script>
+</body>
+</html>
