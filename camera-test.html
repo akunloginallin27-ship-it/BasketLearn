@@ -7,7 +7,9 @@
   <title>BasketLearn - Tes Kamera</title>
 
   <style>
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
 
     body {
       margin: 0;
@@ -22,7 +24,9 @@
       margin: auto;
     }
 
-    h1 { margin-bottom: 8px; }
+    h1 {
+      margin-bottom: 8px;
+    }
 
     .description {
       color: #52665f;
@@ -55,6 +59,51 @@
       transform: scaleX(-1);
     }
 
+    /* TOMBOL FULLSCREEN */
+    #fullscreenBtn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 10;
+      padding: 11px 16px;
+      border: 0;
+      border-radius: 8px;
+      background: rgba(23, 107, 88, 0.95);
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    #fullscreenBtn:hover {
+      background: #21856e;
+    }
+
+    /* MODE FULLSCREEN */
+    .camera-box:fullscreen {
+      width: 100vw;
+      height: 100vh;
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+      border-radius: 0;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .camera-box:fullscreen video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .camera-box:fullscreen canvas {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
     .controls {
       display: flex;
       gap: 10px;
@@ -77,7 +126,9 @@
       cursor: not-allowed;
     }
 
-    #stopButton { background: #a33c3c; }
+    #stopButton {
+      background: #a33c3c;
+    }
 
     #status {
       margin-top: 16px;
@@ -92,26 +143,12 @@
       color: #64746e;
       font-size: 13px;
     }
-    .camera-box:fullscreen {
-  width: 100vw;
-  height: 100vh;
-  background: #000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.camera-box:fullscreen video,
-.camera-box:fullscreen canvas {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
   </style>
 </head>
 
 <body>
   <main class="container">
+
     <h1>BasketLearn – Tes Kamera</h1>
 
     <p class="description">
@@ -120,14 +157,20 @@
     </p>
 
     <div class="camera-box">
+
       <video id="webcam" autoplay playsinline muted></video>
+
       <canvas id="output"></canvas>
+
+      <button id="fullscreenBtn">
+        ⛶ Fullscreen
+      </button>
+
     </div>
 
     <div class="controls">
       <button id="startButton">Aktifkan Kamera</button>
       <button id="stopButton" disabled>Matikan Kamera</button>
-      <button id="fullscreenBtn" onclick="toggleFullscreen()"> ⛶ Fullscreen</button>
     </div>
 
     <div id="status">
@@ -139,9 +182,11 @@
       dan objek bola. Belum melakukan penilaian teknik
       atau menyimpan video.
     </p>
+
   </main>
 
   <script type="module">
+
     import {
       FilesetResolver,
       PoseLandmarker,
@@ -156,23 +201,73 @@
 
     const startButton = document.getElementById("startButton");
     const stopButton = document.getElementById("stopButton");
+    const fullscreenButton = document.getElementById("fullscreenBtn");
     const statusBox = document.getElementById("status");
 
     let poseLandmarker = null;
     let objectDetector = null;
+    let handLandmarker = null;
     let drawingUtils = null;
+
     let cameraStream = null;
     let animationId = null;
     let isRunning = false;
     let lastVideoTime = -1;
-    let handLandmarker = null;
+
+    // =====================================
+    // FULLSCREEN
+    // =====================================
+
+    async function toggleFullscreen() {
+
+      const cameraBox = document.querySelector(".camera-box");
+
+      try {
+
+        if (!document.fullscreenElement) {
+          await cameraBox.requestFullscreen();
+        } else {
+          await document.exitFullscreen();
+        }
+
+      } catch (error) {
+
+        console.error("Fullscreen gagal:", error);
+
+        statusBox.textContent =
+          "Gagal membuka fullscreen: " + error.message;
+
+      }
+    }
+
+    fullscreenButton.addEventListener(
+      "click",
+      toggleFullscreen
+    );
+
+    document.addEventListener("fullscreenchange", () => {
+
+      fullscreenButton.textContent =
+        document.fullscreenElement
+          ? "✕ Keluar Fullscreen"
+          : "⛶ Fullscreen";
+
+    });
+
+    // =====================================
+    // INISIALISASI MODEL
+    // =====================================
 
     async function initializeModel() {
-      statusBox.textContent = "Memuat model deteksi tubuh...";
+
+      statusBox.textContent =
+        "Memuat model deteksi tubuh...";
 
       const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
       );
+
+      // MODEL TUBUH
 
       poseLandmarker = await PoseLandmarker.createFromOptions(
         vision,
@@ -189,6 +284,8 @@
 
       drawingUtils = new DrawingUtils(ctx);
 
+      // MODEL BOLA
+
       objectDetector = await ObjectDetector.createFromOptions(
         vision,
         {
@@ -202,6 +299,8 @@
           maxResults: 10
         }
       );
+
+      // MODEL TANGAN
 
       handLandmarker = await HandLandmarker.createFromOptions(
         vision,
@@ -220,10 +319,18 @@
       );
     }
 
+    // =====================================
+    // AKTIFKAN KAMERA
+    // =====================================
+
     async function startCamera() {
+
       try {
+
         startButton.disabled = true;
-        statusBox.textContent = "Meminta izin kamera...";
+
+        statusBox.textContent =
+          "Meminta izin kamera...";
 
         cameraStream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -235,6 +342,7 @@
         });
 
         video.srcObject = cameraStream;
+
         await video.play();
 
         console.log(
@@ -247,7 +355,11 @@
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
 
-        if (!poseLandmarker || !objectDetector || !handLandmarker) {
+        if (
+          !poseLandmarker ||
+          !objectDetector ||
+          !handLandmarker
+        ) {
           await initializeModel();
         }
 
@@ -263,7 +375,9 @@
         renderLoop();
 
       } catch (error) {
+
         console.error(error);
+
         stopCamera();
 
         statusBox.textContent =
@@ -271,24 +385,38 @@
           error.message;
 
         startButton.disabled = false;
+
       }
     }
 
+    // =====================================
+    // PROSES DETEKSI
+    // =====================================
+
     function renderLoop() {
+
       if (!isRunning) return;
 
       if (
         video.readyState >= 2 &&
         video.currentTime !== lastVideoTime
       ) {
+
         lastVideoTime = video.currentTime;
 
         const timestamp = performance.now();
 
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        ctx.clearRect(
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
 
         // DETEKSI TUBUH
+
         const result = poseLandmarker.detectForVideo(
           video,
           timestamp
@@ -299,10 +427,16 @@
         let handFound = false;
 
         // GAMBAR KERANGKA TUBUH
-        if (result.landmarks && result.landmarks.length > 0) {
+
+        if (
+          result.landmarks &&
+          result.landmarks.length > 0
+        ) {
+
           bodyFound = true;
 
           for (const landmarks of result.landmarks) {
+
             drawingUtils.drawConnectors(
               landmarks,
               PoseLandmarker.POSE_CONNECTIONS,
@@ -320,10 +454,12 @@
                 radius: 4
               }
             );
+
           }
         }
 
         // DETEKSI TANGAN DAN JARI
+
         const handResult = handLandmarker.detectForVideo(
           video,
           timestamp
@@ -333,15 +469,19 @@
           handResult.landmarks &&
           handResult.landmarks.length > 0
         ) {
+
           handFound = true;
 
           const posePoints = result.landmarks?.[0];
 
           for (const hand of handResult.landmarks) {
+
             const handWrist = hand[0];
 
             // HUBUNGKAN PERGELANGAN POSE DAN HAND
+
             if (posePoints && handWrist) {
+
               const wristCandidates = [
                 posePoints[15],
                 posePoints[16]
@@ -350,21 +490,32 @@
               );
 
               if (wristCandidates.length > 0) {
+
                 let nearestWrist = null;
                 let minDistance = Infinity;
 
                 for (const wrist of wristCandidates) {
+
                   const dx = wrist.x - handWrist.x;
                   const dy = wrist.y - handWrist.y;
-                  const distance = Math.sqrt(dx * dx + dy * dy);
+
+                  const distance = Math.sqrt(
+                    dx * dx + dy * dy
+                  );
 
                   if (distance < minDistance) {
+
                     minDistance = distance;
                     nearestWrist = wrist;
+
                   }
                 }
 
-                if (nearestWrist && minDistance < 0.20) {
+                if (
+                  nearestWrist &&
+                  minDistance < 0.20
+                ) {
+
                   ctx.beginPath();
 
                   ctx.moveTo(
@@ -377,14 +528,16 @@
                     handWrist.y * canvas.height
                   );
 
-                  ctx.strokeStyle = "#00FFFF";
+                  ctx.strokeStyle = "#B266FF";
                   ctx.lineWidth = 4;
                   ctx.stroke();
+
                 }
               }
             }
 
             // GARIS PERSENDIAN JARI
+
             drawingUtils.drawConnectors(
               hand,
               HandLandmarker.HAND_CONNECTIONS,
@@ -395,6 +548,7 @@
             );
 
             // TITIK ANATOMI TANGAN
+
             drawingUtils.drawLandmarks(
               hand,
               {
@@ -404,22 +558,26 @@
                 radius: 4
               }
             );
+
           }
         }
 
         // DETEKSI BOLA
+
         const objectResult = objectDetector.detectForVideo(
           video,
           timestamp
         );
 
         for (const detection of objectResult.detections) {
+
           const category = detection.categories[0];
 
           if (
             category &&
             category.categoryName.toLowerCase() === "sports ball"
           ) {
+
             const box = detection.boundingBox;
 
             ctx.strokeStyle = "#FFD700";
@@ -442,80 +600,99 @@
             );
 
             ballFound = true;
+
           }
         }
 
         // STATUS SISTEM
+
         if (bodyFound && handFound && ballFound) {
+
           statusBox.textContent =
             "Tubuh, tangan, dan bola berhasil terdeteksi!";
+
         } else if (handFound) {
+
           statusBox.textContent =
             "Tangan dan jari berhasil terdeteksi!";
+
         } else if (bodyFound) {
+
           statusBox.textContent =
             "Tubuh terdeteksi. Arahkan tangan ke kamera.";
+
         } else {
+
           statusBox.textContent =
             "Tubuh dan tangan belum terdeteksi.";
+
         }
       }
 
       animationId = requestAnimationFrame(renderLoop);
+
     }
 
+    // =====================================
+    // MATIKAN KAMERA
+    // =====================================
+
     function stopCamera() {
+
       isRunning = false;
 
       if (animationId !== null) {
+
         cancelAnimationFrame(animationId);
         animationId = null;
+
       }
 
       if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
+
+        cameraStream.getTracks().forEach(track =>
+          track.stop()
+        );
+
         cameraStream = null;
+
       }
 
       video.srcObject = null;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
 
       startButton.disabled = false;
       stopButton.disabled = true;
 
-      statusBox.textContent = "Kamera telah dimatikan.";
+      statusBox.textContent =
+        "Kamera telah dimatikan.";
+
     }
 
-    startButton.addEventListener("click", startCamera);
-    stopButton.addEventListener("click", stopCamera);
+    // EVENT TOMBOL
 
-    window.addEventListener("beforeunload", stopCamera);
-    async function toggleFullscreen() {
-  const cameraBox = document.querySelector(".camera-box");
-  const button = document.getElementById("fullscreenBtn");
+    startButton.addEventListener(
+      "click",
+      startCamera
+    );
 
-  if (!document.fullscreenElement) {
-    try {
-      await cameraBox.requestFullscreen();
-      button.textContent = "✕ Keluar Fullscreen";
-    } catch (error) {
-      console.error("Gagal membuka fullscreen:", error);
-    }
-  } else {
-    await document.exitFullscreen();
-    button.textContent = "⛶ Fullscreen";
-  }
-}
+    stopButton.addEventListener(
+      "click",
+      stopCamera
+    );
 
-document.addEventListener("fullscreenchange", () => {
-  const button = document.getElementById("fullscreenBtn");
+    window.addEventListener(
+      "beforeunload",
+      stopCamera
+    );
 
-  if (button) {
-    button.textContent = document.fullscreenElement
-      ? "✕ Keluar Fullscreen"
-      : "⛶ Fullscreen";
-  }
-});
   </script>
+
 </body>
 </html>
