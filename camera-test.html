@@ -214,50 +214,27 @@
     let isRunning = false;
     let lastVideoTime = -1;
 
-    // =====================================
-    // FULLSCREEN
-    // =====================================
+    fullscreenButton.addEventListener("click", async () => {
+  const cameraBox = document.querySelector(".camera-box");
 
-    async function toggleFullscreen() {
-
-      const cameraBox = document.querySelector(".camera-box");
-
-      try {
-
-        if (!document.fullscreenElement) {
-          await cameraBox.requestFullscreen();
-        } else {
-          await document.exitFullscreen();
-        }
-
-      } catch (error) {
-
-        console.error("Fullscreen gagal:", error);
-
-        statusBox.textContent =
-          "Gagal membuka fullscreen: " + error.message;
-
-      }
+  try {
+    if (cameraBox.requestFullscreen) {
+      await cameraBox.requestFullscreen();
+    } else if (cameraBox.webkitRequestFullscreen) {
+      cameraBox.webkitRequestFullscreen();
     }
+  } catch (error) {
+    console.error("Fullscreen error:", error);
+    alert("Fullscreen gagal: " + error.message);
+  }
+});
 
-    fullscreenButton.addEventListener(
-      "click",
-      toggleFullscreen
-    );
-
-    document.addEventListener("fullscreenchange", () => {
-
-      fullscreenButton.textContent =
-        document.fullscreenElement
-          ? "✕ Keluar Fullscreen"
-          : "⛶ Fullscreen";
-
-    });
-
-    // =====================================
-    // INISIALISASI MODEL
-    // =====================================
-
+document.addEventListener("fullscreenchange", () => {
+  fullscreenButton.textContent = document.fullscreenElement
+    ? "✕ Keluar Fullscreen"
+    : "⛶ Fullscreen";
+});
+    
     async function initializeModel() {
 
       statusBox.textContent =
@@ -318,10 +295,6 @@
         }
       );
     }
-
-    // =====================================
-    // AKTIFKAN KAMERA
-    // =====================================
 
     async function startCamera() {
 
@@ -389,10 +362,6 @@
       }
     }
 
-    // =====================================
-    // PROSES DETEKSI
-    // =====================================
-
     function renderLoop() {
 
       if (!isRunning) return;
@@ -426,8 +395,6 @@
         let ballFound = false;
         let handFound = false;
 
-        // GAMBAR KERANGKA TUBUH
-
         if (
           result.landmarks &&
           result.landmarks.length > 0
@@ -457,8 +424,6 @@
 
           }
         }
-
-        // DETEKSI TANGAN DAN JARI
 
         const handResult = handLandmarker.detectForVideo(
           video,
