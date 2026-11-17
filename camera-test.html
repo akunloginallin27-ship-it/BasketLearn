@@ -132,11 +132,12 @@ canvas {
 
   <script type="module">
     import {
-  FilesetResolver,
-  PoseLandmarker,
-  ObjectDetector,
-  DrawingUtils
-} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs";
+      FilesetResolver,
+      PoseLandmarker,
+      ObjectDetector,
+      HandLandmarker,
+      DrawingUtils
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs";
 
     const video = document.getElementById("webcam");
     const canvas = document.getElementById("output");
@@ -153,6 +154,7 @@ canvas {
     let animationId = null;
     let isRunning = false;
     let lastVideoTime = -1;
+    let handLandmarker = null;
 
     async function initializeModel() {
       statusBox.textContent = "Memuat model deteksi tubuh...";
@@ -186,8 +188,23 @@ canvas {
     runningMode: "VIDEO",
     scoreThreshold: 0.35,
     maxResults: 10
+    }
+);
+
+// TAMBAHAN MODEL PENDETEKSI JARI
+handLandmarker = await HandLandmarker.createFromOptions(
+  vision,
+  {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO",
+    numHands: 2
   }
 );
+
 }
 
     async function startCamera() {
@@ -210,9 +227,9 @@ canvas {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
 
-        if (!poseLandmarker || !objectDetector) {
-           await initializeModel();
-      }
+        if (!poseLandmarker || !objectDetector || !handLandmarker) {
+         await initializeModel();
+       }
 
         isRunning = true;
         lastVideoTime = -1;
@@ -239,6 +256,7 @@ canvas {
     }
 
     
+
 function renderLoop() {
   if (!isRunning) return;
 
@@ -260,7 +278,9 @@ function renderLoop() {
 
     let bodyFound = false;
     let ballFound = false;
+    let handFound = false;
 
+    // GAMBAR KERANGKA TUBUH
     if (result.landmarks && result.landmarks.length > 0) {
       bodyFound = true;
 
@@ -280,6 +300,43 @@ function renderLoop() {
             color: "#FF3030",
             lineWidth: 2,
             radius: 4
+          }
+        );
+      }
+    }
+
+    // DETEKSI TANGAN DAN JARI
+    const handResult = handLandmarker.detectForVideo(
+      video,
+      timestamp
+    );
+
+    if (
+      handResult.landmarks &&
+      handResult.landmarks.length > 0
+    ) {
+      handFound = true;
+
+      for (const hand of handResult.landmarks) {
+
+        // GARIS PERSENDIAN JARI
+        drawingUtils.drawConnectors(
+          hand,
+          HandLandmarker.HAND_CONNECTIONS,
+          {
+            color: "#00FFFF",
+            lineWidth: 3
+          }
+        );
+
+        // TITIK-TITIK ANATOMI TANGAN
+        drawingUtils.drawLandmarks(
+          hand,
+          {
+            color: "#FF0000",
+            fillColor: "#FF0000",
+            lineWidth: 2,
+            radius: 5
           }
         );
       }
@@ -324,18 +381,18 @@ function renderLoop() {
     }
 
     // STATUS SISTEM
-    if (bodyFound && ballFound) {
+    if (bodyFound && handFound && ballFound) {
       statusBox.textContent =
-        "Tubuh dan bola berhasil terdeteksi!";
+        "Tubuh, tangan, dan bola berhasil terdeteksi!";
+    } else if (handFound) {
+      statusBox.textContent =
+        "Tangan dan jari berhasil terdeteksi!";
     } else if (bodyFound) {
       statusBox.textContent =
-        "Tubuh terdeteksi. Bola belum ditemukan.";
-    } else if (ballFound) {
-      statusBox.textContent =
-        "Bola terdeteksi. Tubuh belum ditemukan.";
+        "Tubuh terdeteksi. Arahkan tangan ke kamera.";
     } else {
       statusBox.textContent =
-        "Tubuh dan bola belum terdeteksi.";
+        "Tubuh dan tangan belum terdeteksi.";
     }
   }
 
