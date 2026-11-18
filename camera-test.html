@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BasketLearn - Tes Kamera V4</title>
+<title>BasketLearn - Tes Kamera V5</title>
 
 <style>
 * { box-sizing: border-box; }
@@ -17,10 +17,7 @@ body {
   color: #153d35;
 }
 
-.container {
-  max-width: 850px;
-  margin: auto;
-}
+.container { max-width: 850px; margin: auto; }
 
 h1 { margin-bottom: 8px; }
 
@@ -135,12 +132,7 @@ canvas {
   justify-content: center;
 }
 
-.camera-box:fullscreen video {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
+.camera-box:fullscreen video,
 .camera-box:fullscreen canvas {
   width: 100%;
   height: 100%;
@@ -206,11 +198,11 @@ button:disabled {
 
 <main class="container">
 
-<h1>BasketLearn – Tes Kamera V4</h1>
+<h1>BasketLearn – Tes Kamera V5</h1>
 
 <p class="description">
   Prototipe analisis postur tubuh, sudut lutut,
-  kemiringan badan, deteksi objek, pergerakan bola,
+  kemiringan badan, deteksi bola, pergerakan bola,
   jumlah pantulan, dan kedekatan tangan dengan bola.
 </p>
 
@@ -263,12 +255,6 @@ button:disabled {
       Menunggu deteksi bola...
     </div>
 
-    <div class="metric-section">DIAGNOSTIK OBJEK</div>
-
-    <div class="metric-note" id="objectStatus">
-      Menunggu pembacaan objek...
-    </div>
-
   </div>
 
   <button id="fullscreenBtn">⛶ Fullscreen</button>
@@ -285,11 +271,10 @@ button:disabled {
 </div>
 
 <p class="note">
-  V4 merupakan prototipe pengujian deteksi objek.
-  Kotak kuning menandai objek yang dikenali sebagai bola.
-  Kotak biru menunjukkan objek lain yang terdeteksi.
-  Hasil pengukuran dan penghitungan pantulan belum tervalidasi.
-  Video tidak disimpan.
+  V5 merupakan prototipe pengujian deteksi bola dan analisis gerakan.
+  Kotak kuning menunjukkan bola yang berhasil dikenali model.
+  Video tidak disimpan. Hasil pengukuran dan penghitungan pantulan
+  belum tervalidasi.
 </p>
 
 </main>
@@ -326,10 +311,9 @@ const bounceCountDisplay = document.getElementById("bounceCount");
 const ballDirectionDisplay = document.getElementById("ballDirection");
 const handBallDistanceDisplay = document.getElementById("handBallDistance");
 const ballStatusDisplay = document.getElementById("ballStatus");
-const objectStatusDisplay = document.getElementById("objectStatus");
 
 // =====================================
-// VARIABEL MODEL
+// MODEL DAN KAMERA
 // =====================================
 
 let poseLandmarker = null;
@@ -348,10 +332,8 @@ let lastVideoTime = -1;
 // =====================================
 
 let bounceCount = 0;
-
 let previousBallY = null;
 let previousBallTimestamp = null;
-
 let smoothedBallY = null;
 let currentBallCenter = null;
 let currentBallDirection = "--";
@@ -368,31 +350,25 @@ let lastBallDetectionTime = 0;
 // =====================================
 
 fullscreenButton.addEventListener("click", async () => {
-
   const cameraBox = document.querySelector(".camera-box");
 
   try {
-
     if (!document.fullscreenElement) {
       await cameraBox.requestFullscreen();
     } else {
       await document.exitFullscreen();
     }
-
   } catch (error) {
     console.error("Fullscreen error:", error);
     alert("Fullscreen gagal: " + error.message);
   }
-
 });
 
 document.addEventListener("fullscreenchange", () => {
-
   fullscreenButton.textContent =
     document.fullscreenElement
       ? "✕ Keluar Fullscreen"
       : "⛶ Fullscreen";
-
 });
 
 // =====================================
@@ -451,7 +427,6 @@ async function initializeModel() {
   );
 
   drawingUtils = new DrawingUtils(ctx);
-
 }
 
 // =====================================
@@ -459,12 +434,10 @@ async function initializeModel() {
 // =====================================
 
 function isVisible(point, threshold = 0.5) {
-
   return (
     point &&
     (point.visibility ?? 1) >= threshold
   );
-
 }
 
 // =====================================
@@ -492,9 +465,7 @@ function calculateAngle(pointA, pointB, pointC) {
   const magnitude1 = Math.hypot(vector1.x, vector1.y);
   const magnitude2 = Math.hypot(vector2.x, vector2.y);
 
-  if (magnitude1 === 0 || magnitude2 === 0) {
-    return null;
-  }
+  if (magnitude1 === 0 || magnitude2 === 0) return null;
 
   const cosine = Math.max(
     -1,
@@ -504,7 +475,6 @@ function calculateAngle(pointA, pointB, pointC) {
   return Math.round(
     Math.acos(cosine) * (180 / Math.PI)
   );
-
 }
 
 // =====================================
@@ -523,9 +493,7 @@ function calculateBodyLean(landmarks) {
     !isVisible(rightShoulder) ||
     !isVisible(leftHip) ||
     !isVisible(rightHip)
-  ) {
-    return null;
-  }
+  ) return null;
 
   const shoulderX =
     ((leftShoulder.x + rightShoulder.x) / 2) * canvas.width;
@@ -547,7 +515,6 @@ function calculateBodyLean(landmarks) {
   return Math.round(
     Math.atan2(Math.abs(dx), Math.abs(dy)) * (180 / Math.PI)
   );
-
 }
 
 // =====================================
@@ -598,12 +565,36 @@ function analyzeBody(landmarks) {
   bodyLeanDisplay.textContent =
     bodyLean !== null ? bodyLean + "°" : "--";
 
-  return {
-    leftKnee: leftAngle,
-    rightKnee: rightAngle,
-    bodyLean
-  };
+  return { leftKnee: leftAngle, rightKnee: rightAngle, bodyLean };
+}
 
+// =====================================
+// MENGENALI KATEGORI BOLA
+// =====================================
+
+function isBallCategory(label) {
+
+  const name = (label || "").toLowerCase().trim();
+
+  const ballLabels = [
+    "sports ball",
+    "ball",
+    "basketball",
+    "volleyball",
+    "soccer ball",
+    "football",
+    "tennis ball",
+    "baseball",
+    "softball",
+    "futsal ball",
+    "handball",
+    "rugby ball",
+    "ping pong ball"
+  ];
+
+  return ballLabels.some(item =>
+    name === item || name.includes(item)
+  );
 }
 
 // =====================================
@@ -614,7 +605,6 @@ function analyzeBall(box, timestamp) {
 
   const centerX = box.originX + box.width / 2;
   const centerY = box.originY + box.height / 2;
-
   const normalizedY = centerY / canvas.height;
 
   currentBallCenter = {
@@ -698,28 +688,22 @@ function analyzeBall(box, timestamp) {
       const enoughTime = timestamp - lastBounceTime >= 300;
 
       if (enoughMovement && enoughTime) {
-
         bounceCount++;
         bounceCountDisplay.textContent = bounceCount;
         lastBounceTime = timestamp;
 
         ballStatusDisplay.textContent =
           "Perubahan arah turun-naik terdeteksi.";
-
       }
 
       ballPhase = "ascending";
-
     }
-
   }
 
   previousBallY = smoothedBallY;
   previousBallTimestamp = timestamp;
 
-  ballDirectionDisplay.textContent =
-    currentBallDirection;
-
+  ballDirectionDisplay.textContent = currentBallDirection;
 }
 
 // =====================================
@@ -742,7 +726,6 @@ function analyzeHandBallDistance(handResult) {
   }
 
   const palmIndices = [0, 5, 9, 13, 17];
-
   let nearestDistance = Infinity;
 
   const frameDiagonal = Math.hypot(
@@ -780,11 +763,7 @@ function analyzeHandBallDistance(handResult) {
       centerDistance - currentBallCenter.radius
     );
 
-    nearestDistance = Math.min(
-      nearestDistance,
-      edgeDistance
-    );
-
+    nearestDistance = Math.min(nearestDistance, edgeDistance);
   }
 
   if (!Number.isFinite(nearestDistance)) {
@@ -802,7 +781,6 @@ function analyzeHandBallDistance(handResult) {
 
   handBallDistanceDisplay.textContent =
     roundedDistance + "%" + description;
-
 }
 
 // =====================================
@@ -812,7 +790,6 @@ function analyzeHandBallDistance(handResult) {
 function resetBallAnalysis() {
 
   bounceCount = 0;
-
   previousBallY = null;
   previousBallTimestamp = null;
   smoothedBallY = null;
@@ -833,10 +810,6 @@ function resetBallAnalysis() {
 
   ballStatusDisplay.textContent =
     "Menunggu deteksi bola...";
-
-  objectStatusDisplay.textContent =
-    "Menunggu pembacaan objek...";
-
 }
 
 // =====================================
@@ -851,7 +824,6 @@ function resetMetrics() {
 
   visibilityDisplay.textContent =
     "Tubuh belum terdeteksi.";
-
 }
 
 // =====================================
@@ -885,21 +857,14 @@ async function startCamera() {
     });
 
     video.srcObject = cameraStream;
-
     await video.play();
 
     await new Promise(resolve => {
-
       if (video.videoWidth > 0) {
         resolve();
       } else {
-        video.addEventListener(
-          "loadedmetadata",
-          resolve,
-          { once: true }
-        );
+        video.addEventListener("loadedmetadata", resolve, { once: true });
       }
-
     });
 
     canvas.width = video.videoWidth;
@@ -912,11 +877,7 @@ async function startCamera() {
       video.videoHeight
     );
 
-    if (
-      !poseLandmarker ||
-      !objectDetector ||
-      !handLandmarker
-    ) {
+    if (!poseLandmarker || !objectDetector || !handLandmarker) {
       await initializeModel();
     }
 
@@ -938,20 +899,16 @@ async function startCamera() {
   } catch (error) {
 
     console.error("Kesalahan kamera/model:", error);
-
     stopCamera();
 
     statusBox.textContent =
-      "Gagal mengaktifkan kamera atau model: " +
-      error.message;
+      "Gagal mengaktifkan kamera atau model: " + error.message;
 
   } finally {
 
     isInitializing = false;
     startButton.disabled = isRunning;
-
   }
-
 }
 
 // =====================================
@@ -970,15 +927,12 @@ function renderLoop() {
     ) {
 
       lastVideoTime = video.currentTime;
-
       const timestamp = performance.now();
 
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // =================================
       // DETEKSI TUBUH
-      // =================================
 
       const result = poseLandmarker.detectForVideo(
         video,
@@ -989,10 +943,7 @@ function renderLoop() {
       let ballFound = false;
       let handFound = false;
 
-      if (
-        result.landmarks &&
-        result.landmarks.length > 0
-      ) {
+      if (result.landmarks && result.landmarks.length > 0) {
 
         bodyFound = true;
 
@@ -1015,12 +966,9 @@ function renderLoop() {
               radius: 4
             }
           );
-
         }
 
-        const measurements = analyzeBody(
-          result.landmarks[0]
-        );
+        const measurements = analyzeBody(result.landmarks[0]);
 
         const validKnees = [
           measurements.leftKnee,
@@ -1042,22 +990,16 @@ function renderLoop() {
         resetMetrics();
       }
 
-      // =================================
       // DETEKSI TANGAN
-      // =================================
 
       const handResult = handLandmarker.detectForVideo(
         video,
         timestamp
       );
 
-      if (
-        handResult.landmarks &&
-        handResult.landmarks.length > 0
-      ) {
+      if (handResult.landmarks && handResult.landmarks.length > 0) {
 
         handFound = true;
-
         const posePoints = result.landmarks?.[0];
 
         for (const hand of handResult.landmarks) {
@@ -1082,14 +1024,12 @@ function renderLoop() {
 
                 const dx = wrist.x - handWrist.x;
                 const dy = wrist.y - handWrist.y;
-
                 const distance = Math.hypot(dx, dy);
 
                 if (distance < minDistance) {
                   minDistance = distance;
                   nearestWrist = wrist;
                 }
-
               }
 
               if (nearestWrist && minDistance < 0.20) {
@@ -1109,11 +1049,8 @@ function renderLoop() {
                 ctx.strokeStyle = "#B266FF";
                 ctx.lineWidth = 4;
                 ctx.stroke();
-
               }
-
             }
-
           }
 
           drawingUtils.drawConnectors(
@@ -1134,14 +1071,11 @@ function renderLoop() {
               radius: 4
             }
           );
-
         }
-
       }
 
-      // =================================
-      // DETEKSI OBJEK V4
-      // =================================
+      // DETEKSI BOLA
+      // Hanya menggambar kotak kuning untuk kategori bola.
 
       const objectResult = objectDetector.detectForVideo(
         video,
@@ -1151,35 +1085,29 @@ function renderLoop() {
       let bestBall = null;
       let bestBallScore = 0;
 
-      const detectedObjects = [];
-
       for (const detection of objectResult.detections) {
 
-        const category = detection.categories[0];
-
+        const category = detection.categories?.[0];
         if (!category) continue;
 
-        const label = category.categoryName || "Tidak diketahui";
+        const label = category.categoryName || "";
         const score = category.score;
-        const box = detection.boundingBox;
 
-        detectedObjects.push(
-          label + " (" + Math.round(score * 100) + "%)"
-        );
+        if (!isBallCategory(label)) continue;
 
-        const normalizedLabel = label.toLowerCase();
+        if (score > bestBallScore) {
+          bestBall = detection;
+          bestBallScore = score;
+        }
+      }
 
-        const isBall =
-          normalizedLabel.includes("sports ball") ||
-          normalizedLabel.includes("volleyball") ||
-          normalizedLabel.includes("basketball") ||
-          normalizedLabel === "ball";
+      if (bestBall) {
 
-        // KUNING = BOLA
-        // BIRU = OBJEK LAIN
+        const box = bestBall.boundingBox;
 
-        ctx.strokeStyle = isBall ? "#FFD700" : "#00D9FF";
-        ctx.lineWidth = isBall ? 4 : 2;
+        // Kotak kuning hanya untuk bola
+        ctx.strokeStyle = "#FFD700";
+        ctx.lineWidth = 4;
 
         ctx.strokeRect(
           box.originX,
@@ -1188,70 +1116,33 @@ function renderLoop() {
           box.height
         );
 
-        ctx.fillStyle = isBall ? "#FFD700" : "#00D9FF";
-        ctx.font = "16px Arial";
+        ctx.fillStyle = "#FFD700";
+        ctx.font = "bold 17px Arial";
 
         ctx.fillText(
-          label + " " + Math.round(score * 100) + "%",
+          "BOLA " + Math.round(bestBallScore * 100) + "%",
           box.originX,
-          Math.max(20, box.originY - 8)
+          Math.max(22, box.originY - 8)
         );
 
-        if (isBall && score > bestBallScore) {
-          bestBall = detection;
-          bestBallScore = score;
-        }
-
-      }
-
-      // =================================
-      // HASIL DETEKSI BOLA
-      // =================================
-
-      if (bestBall) {
-
-        const box = bestBall.boundingBox;
-
         analyzeBall(box, timestamp);
-
         ballFound = true;
 
         ballStatusDisplay.textContent =
-          "Bola terdeteksi: " +
-          Math.round(bestBallScore * 100) + "%";
+          "Bola terdeteksi (" +
+          Math.round(bestBallScore * 100) + "%).";
 
       } else {
 
         ballStatusDisplay.textContent =
-          "Kategori bola belum dikenali.";
-
+          "Bola belum terdeteksi.";
       }
 
-      // =================================
-      // DIAGNOSTIK SELURUH OBJEK
-      // =================================
-
-      if (detectedObjects.length > 0) {
-
-        objectStatusDisplay.textContent =
-          detectedObjects.join(" | ");
-
-      } else {
-
-        objectStatusDisplay.textContent =
-          "Tidak ada objek yang terdeteksi.";
-
-      }
-
-      // =================================
       // ANALISIS JARAK TANGAN DAN BOLA
-      // =================================
 
       analyzeHandBallDistance(handResult);
 
-      // =================================
-      // RESET TRACKING SAAT BOLA HILANG
-      // =================================
+      // RESET TRACKING JIKA BOLA HILANG
 
       if (!ballFound) {
 
@@ -1273,14 +1164,10 @@ function renderLoop() {
 
           ballDirectionDisplay.textContent = "--";
           handBallDistanceDisplay.textContent = "--";
-
         }
-
       }
 
-      // =================================
       // STATUS SISTEM
-      // =================================
 
       if (bodyFound && handFound && ballFound) {
 
@@ -1301,9 +1188,7 @@ function renderLoop() {
 
         statusBox.textContent =
           "Tubuh belum terdeteksi. Atur posisi di depan kamera.";
-
       }
-
     }
 
   } catch (error) {
@@ -1315,13 +1200,11 @@ function renderLoop() {
 
     stopCamera();
     return;
-
   }
 
   if (isRunning) {
     animationId = requestAnimationFrame(renderLoop);
   }
-
 }
 
 // =====================================
@@ -1338,10 +1221,8 @@ function stopCamera() {
   }
 
   if (cameraStream) {
-
     cameraStream.getTracks().forEach(track => track.stop());
     cameraStream = null;
-
   }
 
   video.srcObject = null;
@@ -1360,10 +1241,8 @@ function stopCamera() {
   stopButton.disabled = true;
 
   if (!isInitializing) {
-    statusBox.textContent =
-      "Kamera telah dimatikan.";
+    statusBox.textContent = "Kamera telah dimatikan.";
   }
-
 }
 
 // =====================================
