@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BasketLearn - Tes Kamera</title>
+  <title>BasketLearn - Tes Kamera V1</title>
 
   <style>
     * {
@@ -59,7 +59,6 @@
       transform: scaleX(-1);
     }
 
-    /* TOMBOL FULLSCREEN */
     #fullscreenBtn {
       position: absolute;
       top: 12px;
@@ -78,7 +77,52 @@
       background: #21856e;
     }
 
+    /* PANEL PENGUKURAN */
+
+    .metrics-panel {
+      position: absolute;
+      left: 12px;
+      bottom: 12px;
+      z-index: 5;
+      width: 235px;
+      padding: 13px;
+      border-radius: 10px;
+      background: rgba(10, 25, 21, 0.88);
+      color: white;
+      font-size: 13px;
+      line-height: 1.6;
+      pointer-events: none;
+    }
+
+    .metrics-title {
+      font-weight: bold;
+      font-size: 14px;
+      margin-bottom: 7px;
+      color: #8de4c2;
+    }
+
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .metric-value {
+      font-weight: bold;
+      color: #ffffff;
+      white-space: nowrap;
+    }
+
+    .metric-note {
+      margin-top: 7px;
+      padding-top: 7px;
+      border-top: 1px solid rgba(255,255,255,0.2);
+      color: #cbd8d3;
+      font-size: 11px;
+    }
+
     /* MODE FULLSCREEN */
+
     .camera-box:fullscreen {
       width: 100vw;
       height: 100vh;
@@ -102,6 +146,11 @@
       width: 100%;
       height: 100%;
       object-fit: contain;
+    }
+
+    .camera-box:fullscreen .metrics-panel {
+      left: 20px;
+      bottom: 20px;
     }
 
     .controls {
@@ -142,18 +191,35 @@
       margin-top: 14px;
       color: #64746e;
       font-size: 13px;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 600px) {
+      body {
+        padding: 14px;
+      }
+
+      .metrics-panel {
+        width: 190px;
+        font-size: 11px;
+      }
+
+      .metrics-title {
+        font-size: 12px;
+      }
     }
   </style>
 </head>
 
 <body>
+
   <main class="container">
 
-    <h1>BasketLearn – Tes Kamera</h1>
+    <h1>BasketLearn – Tes Kamera V1</h1>
 
     <p class="description">
-      Prototipe pendeteksi gerakan tubuh untuk tes
-      stationary dribbling.
+      Prototipe pengukuran postur tubuh dan sudut lutut
+      untuk persiapan penilaian keterampilan low dribbling.
     </p>
 
     <div class="camera-box">
@@ -161,6 +227,33 @@
       <video id="webcam" autoplay playsinline muted></video>
 
       <canvas id="output"></canvas>
+
+      <div class="metrics-panel">
+
+        <div class="metrics-title">
+          PENGUKURAN GERAKAN
+        </div>
+
+        <div class="metric-row">
+          <span>Lutut kiri</span>
+          <span class="metric-value" id="leftKnee">--</span>
+        </div>
+
+        <div class="metric-row">
+          <span>Lutut kanan</span>
+          <span class="metric-value" id="rightKnee">--</span>
+        </div>
+
+        <div class="metric-row">
+          <span>Kemiringan badan</span>
+          <span class="metric-value" id="bodyLean">--</span>
+        </div>
+
+        <div class="metric-note" id="visibility">
+          Menunggu deteksi tubuh...
+        </div>
+
+      </div>
 
       <button id="fullscreenBtn">
         ⛶ Fullscreen
@@ -178,9 +271,9 @@
     </div>
 
     <p class="note">
-      Catatan: prototipe mendeteksi kerangka tubuh, tangan,
-      dan objek bola. Belum melakukan penilaian teknik
-      atau menyimpan video.
+      V1 hanya menampilkan hasil pengukuran sudut dan postur.
+      Belum menghasilkan skor keterampilan.
+      Video tidak disimpan.
     </p>
 
   </main>
@@ -195,6 +288,10 @@
       DrawingUtils
     } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs";
 
+    // =====================================
+    // ELEMEN HTML
+    // =====================================
+
     const video = document.getElementById("webcam");
     const canvas = document.getElementById("output");
     const ctx = canvas.getContext("2d");
@@ -203,6 +300,15 @@
     const stopButton = document.getElementById("stopButton");
     const fullscreenButton = document.getElementById("fullscreenBtn");
     const statusBox = document.getElementById("status");
+
+    const leftKneeDisplay = document.getElementById("leftKnee");
+    const rightKneeDisplay = document.getElementById("rightKnee");
+    const bodyLeanDisplay = document.getElementById("bodyLean");
+    const visibilityDisplay = document.getElementById("visibility");
+
+    // =====================================
+    // VARIABEL MODEL
+    // =====================================
 
     let poseLandmarker = null;
     let objectDetector = null;
@@ -214,31 +320,47 @@
     let isRunning = false;
     let lastVideoTime = -1;
 
+    // =====================================
+    // FULLSCREEN
+    // =====================================
+
     fullscreenButton.addEventListener("click", async () => {
-  const cameraBox = document.querySelector(".camera-box");
 
-  try {
-    if (cameraBox.requestFullscreen) {
-      await cameraBox.requestFullscreen();
-    } else if (cameraBox.webkitRequestFullscreen) {
-      cameraBox.webkitRequestFullscreen();
-    }
-  } catch (error) {
-    console.error("Fullscreen error:", error);
-    alert("Fullscreen gagal: " + error.message);
-  }
-});
+      const cameraBox = document.querySelector(".camera-box");
 
-document.addEventListener("fullscreenchange", () => {
-  fullscreenButton.textContent = document.fullscreenElement
-    ? "✕ Keluar Fullscreen"
-    : "⛶ Fullscreen";
-});
-    
+      try {
+
+        if (cameraBox.requestFullscreen) {
+          await cameraBox.requestFullscreen();
+        } else if (cameraBox.webkitRequestFullscreen) {
+          cameraBox.webkitRequestFullscreen();
+        }
+
+      } catch (error) {
+
+        console.error("Fullscreen error:", error);
+        alert("Fullscreen gagal: " + error.message);
+
+      }
+
+    });
+
+    document.addEventListener("fullscreenchange", () => {
+
+      fullscreenButton.textContent =
+        document.fullscreenElement
+          ? "✕ Keluar Fullscreen"
+          : "⛶ Fullscreen";
+
+    });
+
+    // =====================================
+    // MEMUAT MODEL
+    // =====================================
+
     async function initializeModel() {
 
-      statusBox.textContent =
-        "Memuat model deteksi tubuh...";
+      statusBox.textContent = "Memuat model deteksi...";
 
       const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
@@ -294,7 +416,218 @@ document.addEventListener("fullscreenchange", () => {
           minTrackingConfidence: 0.3
         }
       );
+
     }
+
+    // =====================================
+    // FUNGSI MEMERIKSA VISIBILITAS
+    // =====================================
+
+    function isVisible(point, threshold = 0.5) {
+
+      return (
+        point &&
+        (point.visibility ?? 1) >= threshold
+      );
+
+    }
+
+    // =====================================
+    // MENGHITUNG SUDUT SENDI
+    // =====================================
+
+    function calculateAngle(pointA, pointB, pointC) {
+
+      const ax = pointA.x * canvas.width;
+      const ay = pointA.y * canvas.height;
+
+      const bx = pointB.x * canvas.width;
+      const by = pointB.y * canvas.height;
+
+      const cx = pointC.x * canvas.width;
+      const cy = pointC.y * canvas.height;
+
+      const vector1 = {
+        x: ax - bx,
+        y: ay - by
+      };
+
+      const vector2 = {
+        x: cx - bx,
+        y: cy - by
+      };
+
+      const dotProduct =
+        vector1.x * vector2.x +
+        vector1.y * vector2.y;
+
+      const magnitude1 = Math.sqrt(
+        vector1.x ** 2 + vector1.y ** 2
+      );
+
+      const magnitude2 = Math.sqrt(
+        vector2.x ** 2 + vector2.y ** 2
+      );
+
+      if (magnitude1 === 0 || magnitude2 === 0) {
+        return null;
+      }
+
+      const cosine = Math.max(
+        -1,
+        Math.min(
+          1,
+          dotProduct / (magnitude1 * magnitude2)
+        )
+      );
+
+      const angle =
+        Math.acos(cosine) * (180 / Math.PI);
+
+      return Math.round(angle);
+
+    }
+
+    // =====================================
+    // MENGHITUNG KEMIRINGAN BADAN
+    // =====================================
+
+    function calculateBodyLean(landmarks) {
+
+      const leftShoulder = landmarks[11];
+      const rightShoulder = landmarks[12];
+
+      const leftHip = landmarks[23];
+      const rightHip = landmarks[24];
+
+      if (
+        !isVisible(leftShoulder) ||
+        !isVisible(rightShoulder) ||
+        !isVisible(leftHip) ||
+        !isVisible(rightHip)
+      ) {
+        return null;
+      }
+
+      const shoulderX =
+        ((leftShoulder.x + rightShoulder.x) / 2) *
+        canvas.width;
+
+      const shoulderY =
+        ((leftShoulder.y + rightShoulder.y) / 2) *
+        canvas.height;
+
+      const hipX =
+        ((leftHip.x + rightHip.x) / 2) *
+        canvas.width;
+
+      const hipY =
+        ((leftHip.y + rightHip.y) / 2) *
+        canvas.height;
+
+      const dx = shoulderX - hipX;
+      const dy = shoulderY - hipY;
+
+      const angle =
+        Math.atan2(Math.abs(dx), Math.abs(dy)) *
+        (180 / Math.PI);
+
+      return Math.round(angle);
+
+    }
+
+    // =====================================
+    // ANALISIS POSTUR TUBUH
+    // =====================================
+
+    function analyzeBody(landmarks) {
+
+      // KIRI: HIP 23, KNEE 25, ANKLE 27
+
+      const leftHip = landmarks[23];
+      const leftKnee = landmarks[25];
+      const leftAnkle = landmarks[27];
+
+      // KANAN: HIP 24, KNEE 26, ANKLE 28
+
+      const rightHip = landmarks[24];
+      const rightKnee = landmarks[26];
+      const rightAnkle = landmarks[28];
+
+      let leftAngle = null;
+      let rightAngle = null;
+
+      if (
+        isVisible(leftHip) &&
+        isVisible(leftKnee) &&
+        isVisible(leftAnkle)
+      ) {
+
+        leftAngle = calculateAngle(
+          leftHip,
+          leftKnee,
+          leftAnkle
+        );
+
+      }
+
+      if (
+        isVisible(rightHip) &&
+        isVisible(rightKnee) &&
+        isVisible(rightAnkle)
+      ) {
+
+        rightAngle = calculateAngle(
+          rightHip,
+          rightKnee,
+          rightAnkle
+        );
+
+      }
+
+      const bodyLean = calculateBodyLean(landmarks);
+
+      leftKneeDisplay.textContent =
+        leftAngle !== null
+          ? leftAngle + "°"
+          : "--";
+
+      rightKneeDisplay.textContent =
+        rightAngle !== null
+          ? rightAngle + "°"
+          : "--";
+
+      bodyLeanDisplay.textContent =
+        bodyLean !== null
+          ? bodyLean + "°"
+          : "--";
+
+      return {
+        leftKnee: leftAngle,
+        rightKnee: rightAngle,
+        bodyLean: bodyLean
+      };
+
+    }
+
+    // =====================================
+    // UPDATE PANEL JIKA TUBUH TIDAK TERDETEKSI
+    // =====================================
+
+    function resetMetrics() {
+
+      leftKneeDisplay.textContent = "--";
+      rightKneeDisplay.textContent = "--";
+      bodyLeanDisplay.textContent = "--";
+
+      visibilityDisplay.textContent =
+        "Tubuh belum terdeteksi.";
+
+    }
+
+    // =====================================
+    // MENGAKTIFKAN KAMERA
+    // =====================================
 
     async function startCamera() {
 
@@ -306,12 +639,15 @@ document.addEventListener("fullscreenchange", () => {
           "Meminta izin kamera...";
 
         cameraStream = await navigator.mediaDevices.getUserMedia({
+
           video: {
             facingMode: "user",
             width: { ideal: 1920 },
             height: { ideal: 1080 }
           },
+
           audio: false
+
         });
 
         video.srcObject = cameraStream;
@@ -333,7 +669,9 @@ document.addEventListener("fullscreenchange", () => {
           !objectDetector ||
           !handLandmarker
         ) {
+
           await initializeModel();
+
         }
 
         isRunning = true;
@@ -343,7 +681,7 @@ document.addEventListener("fullscreenchange", () => {
         stopButton.disabled = false;
 
         statusBox.textContent =
-          "Kamera aktif. Silakan berdiri hingga tubuh terlihat.";
+          "Kamera aktif. Pastikan seluruh tubuh terlihat.";
 
         renderLoop();
 
@@ -354,13 +692,18 @@ document.addEventListener("fullscreenchange", () => {
         stopCamera();
 
         statusBox.textContent =
-          "Gagal mengaktifkan kamera atau model. Detail: " +
+          "Gagal mengaktifkan kamera atau model: " +
           error.message;
 
         startButton.disabled = false;
 
       }
+
     }
+
+    // =====================================
+    // PROSES DETEKSI KAMERA
+    // =====================================
 
     function renderLoop() {
 
@@ -384,7 +727,9 @@ document.addEventListener("fullscreenchange", () => {
           canvas.height
         );
 
+        // -------------------------------
         // DETEKSI TUBUH
+        // -------------------------------
 
         const result = poseLandmarker.detectForVideo(
           video,
@@ -423,7 +768,44 @@ document.addEventListener("fullscreenchange", () => {
             );
 
           }
+
+          const landmarks = result.landmarks[0];
+
+          const measurements = analyzeBody(landmarks);
+
+          const validKnees = [
+            measurements.leftKnee,
+            measurements.rightKnee
+          ].filter(value => value !== null);
+
+          const validCount = validKnees.length;
+
+          if (validCount === 2) {
+
+            visibilityDisplay.textContent =
+              "Kedua lutut berhasil diukur.";
+
+          } else if (validCount === 1) {
+
+            visibilityDisplay.textContent =
+              "Hanya satu lutut yang terbaca.";
+
+          } else {
+
+            visibilityDisplay.textContent =
+              "Posisi lutut belum terbaca jelas.";
+
+          }
+
+        } else {
+
+          resetMetrics();
+
         }
+
+        // -------------------------------
+        // DETEKSI TANGAN
+        // -------------------------------
 
         const handResult = handLandmarker.detectForVideo(
           video,
@@ -474,6 +856,7 @@ document.addEventListener("fullscreenchange", () => {
                     nearestWrist = wrist;
 
                   }
+
                 }
 
                 if (
@@ -498,7 +881,9 @@ document.addEventListener("fullscreenchange", () => {
                   ctx.stroke();
 
                 }
+
               }
+
             }
 
             // GARIS PERSENDIAN JARI
@@ -525,9 +910,12 @@ document.addEventListener("fullscreenchange", () => {
             );
 
           }
+
         }
 
+        // -------------------------------
         // DETEKSI BOLA
+        // -------------------------------
 
         const objectResult = objectDetector.detectForVideo(
           video,
@@ -567,31 +955,35 @@ document.addEventListener("fullscreenchange", () => {
             ballFound = true;
 
           }
+
         }
 
+        // -------------------------------
         // STATUS SISTEM
+        // -------------------------------
 
         if (bodyFound && handFound && ballFound) {
 
           statusBox.textContent =
             "Tubuh, tangan, dan bola berhasil terdeteksi!";
 
-        } else if (handFound) {
+        } else if (bodyFound && handFound) {
 
           statusBox.textContent =
-            "Tangan dan jari berhasil terdeteksi!";
+            "Tubuh dan tangan terdeteksi. Bola belum terdeteksi.";
 
         } else if (bodyFound) {
 
           statusBox.textContent =
-            "Tubuh terdeteksi. Arahkan tangan ke kamera.";
+            "Tubuh terdeteksi. Pastikan tangan terlihat.";
 
         } else {
 
           statusBox.textContent =
-            "Tubuh dan tangan belum terdeteksi.";
+            "Tubuh belum terdeteksi. Atur posisi di depan kamera.";
 
         }
+
       }
 
       animationId = requestAnimationFrame(renderLoop);
@@ -632,6 +1024,8 @@ document.addEventListener("fullscreenchange", () => {
         canvas.height
       );
 
+      resetMetrics();
+
       startButton.disabled = false;
       stopButton.disabled = true;
 
@@ -640,7 +1034,9 @@ document.addEventListener("fullscreenchange", () => {
 
     }
 
+    // =====================================
     // EVENT TOMBOL
+    // =====================================
 
     startButton.addEventListener(
       "click",
