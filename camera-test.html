@@ -265,7 +265,7 @@ async function initializeModels() {
       delegate: "GPU"
     },
     runningMode: "VIDEO",
-    scoreThreshold: 0.25,
+    scoreThreshold: 0.15,
     maxResults: 3,
     categoryAllowlist: ["sports ball"]
   });
@@ -375,17 +375,38 @@ function analyzeHands(handResult, poseLm) {
 // Mengambil bola dengan skor tertinggi.
 // Posisi dinormalisasi 0 sampai 1 terhadap ukuran video.
 
-function pickBall(detResult) {
+const HOLD_MS = 120; // lama posisi bola boleh diperkirakan saat deteksi putus
+let lastBall = null;
+
+function pickBall(detResult, now) {
 
   const dets = detResult?.detections;
   if (!dets?.length) return null;
 
   let best = null;
   let bestScore = -1;
+  let bestDist = Infinity;
+
+  // Jika bola baru saja terlacak, pilih deteksi terdekat dari posisi terakhir.
+  // Ini mengurangi deteksi palsu saat ambang skor diturunkan.
+  const ref = lastBall && now - lastBall.t < 400 ? lastBall : null;
 
   for (const d of dets) {
     const s = d.categories?.[0]?.score ?? 0;
-    if (s > bestScore && d.boundingBox) {
+    const bb = d.boundingBox;
+    if (!bb) continue;
+
+    if (ref) {
+      const dist = Math.hypot(
+        (bb.originX + bb.width / 2) / video.videoWidth - ref.x,
+        (bb.originY + bb.height / 2) / video.videoHeight - ref.y
+      );
+      if (dist < bestDist) {
+        best = d;
+        bestDist = dist;
+        bestScore = s;
+      }
+    } else if (s > bestScore) {
       best = d;
       bestScore = s;
     }
@@ -405,15 +426,47 @@ function pickBall(detResult) {
   };
 }
 
+// Menyimpan posisi dan kecepatan bola untuk perkiraan saat deteksi putus.
+function trackBall(ball, now) {
+
+  if (lastBall && now - lastBall.t < 300) {
+    const dt = Math.max(1, now - lastBall.t);
+    ball.vx = (ball.px - lastBall.px) / dt;
+    ball.vy = (ball.py - lastBall.py) / dt;
+    ball.vyn = (ball.y - lastBall.y) / dt;
+  }
+
+  lastBall = { ...ball, t: now };
+}
+
+function predictBall(now) {
+
+  if (!lastBall) return null;
+
+  const dt = now - lastBall.t;
+  if (dt > HOLD_MS) return null;
+
+  return {
+    x: lastBall.x,
+    y: clamp(lastBall.y + (lastBall.vyn || 0) * dt, 0, 1),
+    px: lastBall.px + (lastBall.vx || 0) * dt,
+    py: lastBall.py + (lastBall.vy || 0) * dt,
+    r: lastBall.r,
+    estimated: true
+  };
+}
+
 function drawBall(ball) {
 
   if (!ball) return;
 
+  ctx.setLineDash(ball.estimated ? [8, 6] : []);
   ctx.beginPath();
   ctx.arc(ball.px, ball.py, ball.r, 0, Math.PI * 2);
   ctx.strokeStyle = "#FFA500";
   ctx.lineWidth = 4;
   ctx.stroke();
+  ctx.setLineDash([]);
 }
 
 // ===== PENGHITUNG PANTULAN =====
@@ -562,6 +615,7 @@ function startTest() {
   testSamples = [];
   bounces = [];
   bs = newBallState();
+  lastBall = null;
 
   testActive = true;
   testStartTime = performance.now();
@@ -846,8 +900,14 @@ function renderLoop() {
 
       drawLandmarks(poseResult, handResult);
 
-      const ball = pickBall(ballResult);
-      drawBall(ball);
+      const ball = pickBall(ballResult, now);
+      if (ball) trackBall(ball, now);
+
+      // Jika deteksi putus sebentar, posisi bola diperkirakan.
+      // Perkiraan hanya dipakai untuk pelacak pantulan dan tidak
+      // dihitung sebagai bola terbaca pada pemeriksaan validitas.
+      const est = ball ? null : predictBall(now);
+      drawBall(ball || est);
 
       let measurements = null;
       let handInfo = null;
@@ -906,6 +966,9 @@ function renderLoop() {
       if (ball) {
         ballStatusDisplay.textContent = "Terbaca";
         updateBounce(ball.y, now);
+      } else if (est) {
+        ballStatusDisplay.textContent = "Estimasi";
+        updateBounce(est.y, now);
       } else {
         ballStatusDisplay.textContent = "Hilang";
       }
