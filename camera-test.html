@@ -1,9 +1,10 @@
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BasketLearn - Tes Analisis Gerakan V7</title>
+<title>BasketLearn - Tes Analisis Gerakan V7.1</title>
 
 <style>
 * { box-sizing: border-box; }
@@ -107,14 +108,13 @@ button:disabled { opacity: .48; cursor: not-allowed; }
 </section>
 
 <p class="note">
-  Catatan: V7 adalah prototipe teknis. Pantulan dihitung dari pola
-  gerak vertikal bola yang terbaca kamera. Jika bola kurang terbaca,
-  hitungan memakai gerak pergelangan tangan sebagai cadangan. Ambang dan bobot penilaian
-  masih sementara dan harus ditinjau ahli materi, serta hasil hitungan
-  sistem perlu divalidasi dengan hitungan manual dari video sebelum
-  digunakan sebagai instrumen penelitian. Jika tubuh, tangan, atau bola
-  tidak terbaca cukup lama, tes dinyatakan tidak valid dan perlu
-  diulang. Hasil belum disimpan ke server.
+  Catatan: V7.1 merupakan prototipe teknis. Pantulan hanya dihitung
+  ketika bola terdeteksi oleh model dan pola gerak turun-naiknya memenuhi
+  ambang algoritma. Jika bola kurang terbaca, tes dinyatakan tidak valid.
+  Ambang dan bobot penilaian masih sementara dan harus ditinjau ahli
+  materi. Hasil hitungan sistem perlu divalidasi dengan hitungan manual
+  sebelum digunakan sebagai instrumen penelitian. Hasil belum disimpan
+  ke server.
 </p>
 
 </main>
@@ -129,7 +129,9 @@ import {
   DrawingUtils
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs";
 
-// ===== ELEMEN HTML =====
+// ======================================================
+// ELEMEN HTML
+// ======================================================
 
 const $ = id => document.getElementById(id);
 
@@ -154,7 +156,9 @@ const visibilityDisplay = $("visibility");
 const liveTimerDisplay = $("liveTimer");
 const resultPanel = $("resultPanel");
 
-// ===== VARIABEL MODEL DAN KAMERA =====
+// ======================================================
+// MODEL DAN KAMERA
+// ======================================================
 
 let poseLandmarker = null;
 let handLandmarker = null;
@@ -168,52 +172,83 @@ let isRunning = false;
 let isInitializing = false;
 let lastVideoTime = -1;
 
-// ===== VARIABEL TES =====
+// ======================================================
+// PENGATURAN TES
+// ======================================================
 
 const TEST_DURATION_MS = 30000;
 
-// Ambang sementara. Harus ditinjau ahli materi.
-const TARGET_BOUNCES = 60;      // target pantulan dalam 30 detik
-const MIN_BOUNCE_GAP_MS = 200;  // jeda minimum antar pantulan
-const MAX_GAP_MS = 250;         // bola hilang lebih lama dari ini = reset pelacakan
-const MIN_SAMPLES = 150;        // minimal frame terekam
+const TARGET_BOUNCES = 60;
+
+const MIN_SAMPLES = 150;
 const MIN_POSE_COVERAGE = 0.65;
 const MIN_HAND_COVERAGE = 0.40;
 const MIN_BALL_COVERAGE = 0.50;
 const MIN_BOUNCES = 5;
 
+// Ambang pelacakan bola.
+// Nilai ini adalah parameter awal untuk pengujian teknis,
+// bukan ambang penilaian yang sudah tervalidasi.
+
+const MIN_BALL_CONFIDENCE = 0.20;
+const MIN_BALL_SIZE = 0.010;
+const MAX_BALL_SIZE = 0.40;
+
+const MAX_TRACK_GAP_MS = 350;
+const TRACK_REFERENCE_MS = 500;
+const MIN_BOUNCE_GAP_MS = 250;
+
+// Histeresis dan amplitudo dihitung relatif terhadap panjang torso.
+const BOUNCE_DIRECTION_THRESHOLD = 0.035;
+const BOUNCE_MIN_AMPLITUDE = 0.12;
+
 let testActive = false;
 let testStartTime = 0;
 let testSamples = [];
 
-// Dua pelacak pantulan terpisah: dari bola dan dari pergelangan tangan.
-// hF = histeresis, aF = amplitudo minimum, lowTol = toleransi pantulan rendah
-// (semua dikali panjang torso). Nilai sementara.
-const ballTr = { bs: null, list: [], hF: 0.12, aF: 0.25, lowTol: 0 };
-const wristTr = { bs: null, list: [], hF: 0.10, aF: 0.15, lowTol: 0.1 };
+// Hanya ada satu pelacak pantulan: pelacak bola aktual.
+const ballTr = {
+  state: null,
+  list: []
+};
 
-// Konteks pose terbaru untuk pelacak bola
-let poseCtx = { hipY: null, kneeY: null, scale: 0.25 };
+// Konteks pose untuk normalisasi gerakan bola.
+let poseCtx = {
+  hipY: null,
+  kneeY: null,
+  scale: 0.25
+};
 
-// Status pelacak pantulan
-ballTr.bs = newBallState();
-wristTr.bs = newBallState();
+// Referensi posisi bola terakhir.
+let lastBall = null;
+
+// ======================================================
+// STATE PELACAK BOLA
+// ======================================================
 
 function newBallState() {
   return {
-    init: false,
-    dir: 0,          // 1 = bola turun, -1 = bola naik
-    ref: 0,
-    extY: 0,
-    extT: 0,
+    initialized: false,
+
+    // "seekDown", "down", atau "up"
+    phase: "seekDown",
+
+    previousY: null,
     smoothY: null,
-    lastTopY: null,
-    lastBounceT: -1e9,
-    lastSeenT: -1e9
+
+    topY: null,
+    bottomY: null,
+
+    lastSeenT: -1e9,
+    lastBounceT: -1e9
   };
 }
 
-// ===== FULLSCREEN =====
+ballTr.state = newBallState();
+
+// ======================================================
+// FULLSCREEN
+// ======================================================
 
 fullscreenButton.addEventListener("click", async () => {
   try {
@@ -229,14 +264,19 @@ fullscreenButton.addEventListener("click", async () => {
 
 document.addEventListener("fullscreenchange", () => {
   fullscreenButton.textContent =
-    document.fullscreenElement ? "✕ Keluar Fullscreen" : "⛶ Fullscreen";
+    document.fullscreenElement
+      ? "✕ Keluar Fullscreen"
+      : "⛶ Fullscreen";
 });
 
-// ===== MEMUAT MODEL MEDIAPIPE =====
+// ======================================================
+// MEMUAT MODEL MEDIAPIPE
+// ======================================================
 
 async function initializeModels() {
 
-  statusBox.textContent = "Memuat model analisis tubuh, tangan, dan bola...";
+  statusBox.textContent =
+    "Memuat model analisis tubuh, tangan, dan bola...";
 
   const vision = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
@@ -272,49 +312,83 @@ async function initializeModels() {
       delegate: "GPU"
     },
     runningMode: "VIDEO",
-    scoreThreshold: 0.15,
-    maxResults: 3,
+    scoreThreshold: MIN_BALL_CONFIDENCE,
+    maxResults: 5,
     categoryAllowlist: ["sports ball"]
   });
 
   drawingUtils = new DrawingUtils(ctx);
 }
 
-// ===== FUNGSI BANTU =====
+// ======================================================
+// FUNGSI BANTU
+// ======================================================
 
 function visible(point, threshold = 0.5) {
   return !!point && (point.visibility ?? 1) >= threshold;
 }
 
 function angle(a, b, c) {
-  const v1 = { x: a.x - b.x, y: a.y - b.y };
-  const v2 = { x: c.x - b.x, y: c.y - b.y };
-  const den = Math.hypot(v1.x, v1.y) * Math.hypot(v2.x, v2.y);
+
+  const v1 = {
+    x: a.x - b.x,
+    y: a.y - b.y
+  };
+
+  const v2 = {
+    x: c.x - b.x,
+    y: c.y - b.y
+  };
+
+  const den =
+    Math.hypot(v1.x, v1.y) *
+    Math.hypot(v2.x, v2.y);
+
   if (!den) return null;
-  const cos = Math.max(-1, Math.min(1, (v1.x * v2.x + v1.y * v2.y) / den));
+
+  const cos = Math.max(
+    -1,
+    Math.min(
+      1,
+      (v1.x * v2.x + v1.y * v2.y) / den
+    )
+  );
+
   return Math.acos(cos) * 180 / Math.PI;
 }
 
 function mean(values) {
-  const v = values.filter(Number.isFinite);
-  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+
+  const valid = values.filter(Number.isFinite);
+
+  return valid.length
+    ? valid.reduce((a, b) => a + b, 0) / valid.length
+    : null;
 }
 
 function clamp(value, min = 0, max = 100) {
   return Math.max(min, Math.min(max, value));
 }
 
-// ===== ANALISIS POSTUR TUBUH =====
+// ======================================================
+// ANALISIS POSTUR TUBUH
+// ======================================================
 
 function analyzePose(lm) {
 
   const leftKnee =
-    visible(lm[23]) && visible(lm[25]) && visible(lm[27])
-      ? angle(lm[23], lm[25], lm[27]) : null;
+    visible(lm[23]) &&
+    visible(lm[25]) &&
+    visible(lm[27])
+      ? angle(lm[23], lm[25], lm[27])
+      : null;
 
   const rightKnee =
-    visible(lm[24]) && visible(lm[26]) && visible(lm[28])
-      ? angle(lm[24], lm[26], lm[28]) : null;
+    visible(lm[24]) &&
+    visible(lm[26]) &&
+    visible(lm[28])
+      ? angle(lm[24], lm[26], lm[28])
+      : null;
 
   const knee = mean([leftKnee, rightKnee]);
 
@@ -325,6 +399,7 @@ function analyzePose(lm) {
 
     const sx = (lm[11].x + lm[12].x) / 2;
     const sy = (lm[11].y + lm[12].y) / 2;
+
     const hx = (lm[23].x + lm[24].x) / 2;
     const hy = (lm[23].y + lm[24].y) / 2;
 
@@ -334,28 +409,44 @@ function analyzePose(lm) {
     torso = Math.hypot(dx, dy);
 
     if (Math.abs(dy) > 0.001) {
-      lean = Math.atan2(Math.abs(dx), Math.abs(dy)) * 180 / Math.PI;
+      lean =
+        Math.atan2(Math.abs(dx), Math.abs(dy)) *
+        180 / Math.PI;
     }
   }
 
-  return { leftKnee, rightKnee, knee, lean, torso };
+  return {
+    leftKnee,
+    rightKnee,
+    knee,
+    lean,
+    torso
+  };
 }
 
-// ===== ANALISIS POSISI TANGAN =====
+// ======================================================
+// ANALISIS POSISI TANGAN
+// ======================================================
 
 function analyzeHands(handResult, poseLm) {
 
-  if (!handResult.landmarks?.length || !poseLm) return null;
+  if (!handResult.landmarks?.length || !poseLm) {
+    return null;
+  }
 
   const hipY =
     visible(poseLm[23]) && visible(poseLm[24])
-      ? (poseLm[23].y + poseLm[24].y) / 2 : null;
+      ? (poseLm[23].y + poseLm[24].y) / 2
+      : null;
 
   const kneeY =
     visible(poseLm[25]) && visible(poseLm[26])
-      ? (poseLm[25].y + poseLm[26].y) / 2 : null;
+      ? (poseLm[25].y + poseLm[26].y) / 2
+      : null;
 
-  if (hipY === null || kneeY === null) return null;
+  if (hipY === null || kneeY === null) {
+    return null;
+  }
 
   const wristYs = handResult.landmarks
     .map(hand => hand[0]?.y)
@@ -363,7 +454,6 @@ function analyzeHands(handResult, poseLm) {
 
   if (!wristYs.length) return null;
 
-  // Siswa bebas menggunakan tangan kanan atau kiri.
   const wristY = Math.max(...wristYs);
 
   const minY = Math.min(hipY, kneeY);
@@ -377,545 +467,777 @@ function analyzeHands(handResult, poseLm) {
   };
 }
 
-// ===== DETEKSI BOLA =====
+// ======================================================
+// DETEKSI DAN PEMILIHAN BOLA
+// ======================================================
 
-// Mengambil bola dengan skor tertinggi.
-// Posisi dinormalisasi 0 sampai 1 terhadap ukuran video.
-
-const HOLD_MS = 120; // lama posisi bola boleh diperkirakan saat deteksi putus
-let lastBall = null;
+// Memilih deteksi bola yang paling masuk akal.
+// Sistem tidak memakai warna oranye atau gerakan tangan
+// sebagai pengganti deteksi bola.
 
 function pickBall(detResult, now) {
 
-  const dets = detResult?.detections;
-  if (!dets?.length) return null;
+  const detections = detResult?.detections;
 
-  let best = null;
-  let bestScore = -1;
-  let bestDist = Infinity;
+  if (!detections?.length) return null;
 
-  // Jika bola baru saja terlacak, pilih deteksi terdekat dari posisi terakhir.
-  // Ini mengurangi deteksi palsu saat ambang skor diturunkan.
-  const ref = lastBall && now - lastBall.t < 400 ? lastBall : null;
-
-  for (const d of dets) {
-    const s = d.categories?.[0]?.score ?? 0;
-    const bb = d.boundingBox;
-    if (!bb) continue;
-
-    if (ref) {
-      const dist = Math.hypot(
-        (bb.originX + bb.width / 2) / video.videoWidth - ref.x,
-        (bb.originY + bb.height / 2) / video.videoHeight - ref.y
-      );
-      if (dist < bestDist) {
-        best = d;
-        bestDist = dist;
-        bestScore = s;
-      }
-    } else if (s > bestScore) {
-      best = d;
-      bestScore = s;
-    }
+  if (!video.videoWidth || !video.videoHeight) {
+    return null;
   }
 
-  if (!best) return null;
+  const referenceIsFresh =
+    lastBall &&
+    now - lastBall.t <= TRACK_REFERENCE_MS;
 
-  const b = best.boundingBox;
+  let predictedX = null;
+  let predictedY = null;
+  let referenceAge = null;
 
-  return {
-    x: (b.originX + b.width / 2) / video.videoWidth,
-    y: (b.originY + b.height / 2) / video.videoHeight,
-    px: b.originX + b.width / 2,
-    py: b.originY + b.height / 2,
-    r: Math.max(b.width, b.height) / 2,
-    score: bestScore
-  };
+  if (referenceIsFresh) {
+
+    referenceAge = now - lastBall.t;
+
+    predictedX =
+      lastBall.x +
+      (lastBall.vx || 0) * referenceAge;
+
+    predictedY =
+      lastBall.y +
+      (lastBall.vy || 0) * referenceAge;
+
+    predictedX = Math.max(0, Math.min(1, predictedX));
+    predictedY = Math.max(0, Math.min(1, predictedY));
+  }
+
+  const candidates = [];
+
+  for (const detection of detections) {
+
+    const category = detection.categories?.[0];
+    const confidence = category?.score ?? 0;
+    const box = detection.boundingBox;
+
+    if (!box) continue;
+
+    if (confidence < MIN_BALL_CONFIDENCE) {
+      continue;
+    }
+
+    // Model sudah memakai categoryAllowlist "sports ball".
+    // Pemeriksaan nama kelas tambahan dilakukan jika tersedia.
+    const categoryName =
+      (category?.categoryName || "").toLowerCase();
+
+    if (
+      categoryName &&
+      !categoryName.includes("sports ball")
+    ) {
+      continue;
+    }
+
+    const width = box.width / video.videoWidth;
+    const height = box.height / video.videoHeight;
+
+    if (
+      width < MIN_BALL_SIZE ||
+      height < MIN_BALL_SIZE ||
+      width > MAX_BALL_SIZE ||
+      height > MAX_BALL_SIZE
+    ) {
+      continue;
+    }
+
+    const ratio = box.width / box.height;
+
+    // Menolak kotak yang terlalu pipih atau terlalu memanjang.
+    if (ratio < 0.50 || ratio > 2.00) {
+      continue;
+    }
+
+    const x =
+      (box.originX + box.width / 2) /
+      video.videoWidth;
+
+    const y =
+      (box.originY + box.height / 2) /
+      video.videoHeight;
+
+    let distance = 0;
+
+    if (referenceIsFresh) {
+
+      distance = Math.hypot(
+        x - predictedX,
+        y - predictedY
+      );
+
+      // Batas jarak menyesuaikan lama jeda deteksi.
+      const allowedDistance = Math.min(
+        0.30,
+        0.08 + referenceAge * 0.0015
+      );
+
+      if (distance > allowedDistance) {
+        continue;
+      }
+    }
+
+    candidates.push({
+      x,
+      y,
+
+      px: box.originX + box.width / 2,
+      py: box.originY + box.height / 2,
+
+      r: Math.max(box.width, box.height) / 2,
+
+      score: confidence,
+      distance
+    });
+  }
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  // Jika sudah ada referensi, utamakan posisi yang paling dekat
+  // dengan prediksi pergerakan bola.
+  candidates.sort((a, b) => {
+
+    if (referenceIsFresh) {
+
+      const costA =
+        a.distance - a.score * 0.025;
+
+      const costB =
+        b.distance - b.score * 0.025;
+
+      return costA - costB;
+    }
+
+    return b.score - a.score;
+  });
+
+  return candidates[0];
 }
 
-// Menyimpan posisi dan kecepatan bola untuk perkiraan saat deteksi putus.
+// ======================================================
+// MEMPERBARUI POSISI BOLA
+// ======================================================
+
 function trackBall(ball, now) {
 
-  if (lastBall && now - lastBall.t < 300) {
-    const dt = Math.max(1, now - lastBall.t);
-    ball.vx = (ball.px - lastBall.px) / dt;
-    ball.vy = (ball.py - lastBall.py) / dt;
-    ball.vyn = (ball.y - lastBall.y) / dt;
+  if (
+    lastBall &&
+    now - lastBall.t > MAX_TRACK_GAP_MS
+  ) {
+    lastBall = null;
   }
 
-  lastBall = { ...ball, t: now };
-}
+  if (lastBall) {
 
-function predictBall(now) {
+    const dt = now - lastBall.t;
 
-  if (!lastBall) return null;
+    if (dt > 0) {
 
-  const dt = now - lastBall.t;
-  if (dt > HOLD_MS) return null;
+      ball.vx = (ball.x - lastBall.x) / dt;
+      ball.vy = (ball.y - lastBall.y) / dt;
+    }
 
-  return {
-    x: lastBall.x,
-    y: clamp(lastBall.y + (lastBall.vyn || 0) * dt, 0, 1),
-    px: lastBall.px + (lastBall.vx || 0) * dt,
-    py: lastBall.py + (lastBall.vy || 0) * dt,
-    r: lastBall.r,
-    estimated: true
+  } else {
+
+    ball.vx = 0;
+    ball.vy = 0;
+  }
+
+  lastBall = {
+    x: ball.x,
+    y: ball.y,
+    px: ball.px,
+    py: ball.py,
+    r: ball.r,
+    vx: ball.vx,
+    vy: ball.vy,
+    t: now
   };
 }
+
+// ======================================================
+// MENGGAMBAR BOLA
+// ======================================================
 
 function drawBall(ball) {
 
   if (!ball) return;
 
-  ctx.setLineDash(ball.estimated ? [8, 6] : []);
   ctx.beginPath();
-  ctx.arc(ball.px, ball.py, ball.r, 0, Math.PI * 2);
+
+  ctx.arc(
+    ball.px,
+    ball.py,
+    ball.r,
+    0,
+    Math.PI * 2
+  );
+
   ctx.strokeStyle = "#FFA500";
   ctx.lineWidth = 4;
   ctx.stroke();
-  ctx.setLineDash([]);
 }
 
-// ===== DETEKSI WARNA ORANYE (CADANGAN) =====
+// ======================================================
+// PENGHITUNG PANTULAN BOLA
+// ======================================================
 
-// Dipakai saat model gagal membaca bola. Pencarian dibatasi pada area
-// di sekitar posisi bola terakhir atau pergelangan tangan, supaya warna
-// lain di latar tidak ikut terbaca. Sensitif terhadap cahaya dan warna
-// kulit atau baju yang mirip oranye.
-
-const colorCanvas = document.createElement("canvas");
-colorCanvas.width = 160;
-colorCanvas.height = 90;
-const colorCtx = colorCanvas.getContext("2d", { willReadFrequently: true });
-
-let wristRef = null;
-
-function findOrangeBall(now) {
-
-  if (!video.videoWidth) return null;
-
-  const ref =
-    lastBall && now - lastBall.t < 600
-      ? { x: lastBall.x, y: lastBall.y }
-      : wristRef;
-
-  if (!ref) return null;
-
-  const W = 160;
-  const H = 90;
-
-  colorCtx.drawImage(video, 0, 0, W, H);
-
-  const x0 = Math.max(0, Math.floor((ref.x - 0.2) * W));
-  const x1 = Math.min(W, Math.ceil((ref.x + 0.2) * W));
-  const y0 = Math.max(0, Math.floor((ref.y - 0.35) * H));
-  const y1 = Math.min(H, Math.ceil((ref.y + 0.35) * H));
-
-  if (x1 - x0 < 2 || y1 - y0 < 2) return null;
-
-  const data = colorCtx.getImageData(x0, y0, x1 - x0, y1 - y0);
-  const px = data.data;
-
-  let sx = 0, sy = 0, n = 0;
-
-  for (let i = 0; i < px.length; i += 4) {
-
-    const r = px[i], g = px[i + 1], b = px[i + 2];
-    const mx = Math.max(r, g, b);
-    const d = mx - Math.min(r, g, b);
-
-    if (d === 0) continue;
-
-    const sat = d / mx;
-    if (sat < 0.55 || mx / 255 < 0.35) continue;
-
-    let hue;
-    if (mx === r) hue = ((g - b) / d) % 6;
-    else if (mx === g) hue = (b - r) / d + 2;
-    else hue = (r - g) / d + 4;
-
-    hue *= 60;
-    if (hue < 0) hue += 360;
-    if (hue < 5 || hue > 30) continue;
-
-    const idx = i / 4;
-    sx += x0 + (idx % (x1 - x0));
-    sy += y0 + Math.floor(idx / (x1 - x0));
-    n++;
-  }
-
-  if (n < 8) return null;
-
-  const x = (sx / n) / W;
-  const y = (sy / n) / H;
-
-  return {
-    x,
-    y,
-    px: x * video.videoWidth,
-    py: y * video.videoHeight,
-    r: Math.sqrt(n / Math.PI) * (video.videoWidth / W),
-    score: 0,
-    source: "warna"
-  };
-}
-
-// ===== PELACAK PERGELANGAN TANGAN (CADANGAN) =====
-
-// Memilih pergelangan yang paling aktif bergerak, lalu memakai
-// gerak naik turunnya sebagai sumber hitungan pantulan kedua.
-
-const wristHist = { 15: [], 16: [] };
-let wristIdx = null;
-
-function yRange(arr) {
-  return arr.length < 5 ? 0 : Math.max(...arr) - Math.min(...arr);
-}
-
-function trackWrist(lm, now) {
-
-  const cand = [15, 16].filter(i => visible(lm[i], 0.4));
-  if (!cand.length) return;
-
-  for (const i of cand) {
-    wristHist[i].push(lm[i].y);
-    if (wristHist[i].length > 30) wristHist[i].shift();
-  }
-
-  // Ganti pergelangan hanya jika yang lain jelas lebih aktif.
-  if (wristIdx === null || !cand.includes(wristIdx)) {
-    wristIdx = cand.reduce((a, b) =>
-      yRange(wristHist[b]) > yRange(wristHist[a]) ? b : a
-    );
-  } else {
-    const other = cand.find(i => i !== wristIdx);
-    if (
-      other !== undefined &&
-      yRange(wristHist[other]) > 1.5 * yRange(wristHist[wristIdx])
-    ) {
-      wristIdx = other;
-    }
-  }
-
-  wristRef = { x: lm[wristIdx].x, y: lm[wristIdx].y };
-
-  updateBounce(wristTr, lm[wristIdx].y, now);
-}
-
-// ===== PENGHITUNG PANTULAN =====
-
-// Titik kontak lantai = titik terendah bola di layar (nilai y terbesar).
-// Pantulan dihitung saat bola berbalik naik setelah turun, dengan:
-// 1. penghalusan posisi (EMA),
-// 2. histeresis yang dinormalisasi panjang badan,
-// 3. amplitudo minimum,
-// 4. jeda minimum antar pantulan.
+// Prinsip:
+// 1. Bola harus benar-benar terdeteksi.
+// 2. Sistem mengenali gerakan turun.
+// 3. Sistem mencari titik terendah bola.
+// 4. Sistem menunggu gerakan naik terkonfirmasi.
+// 5. Satu perubahan arah yang memenuhi amplitudo dihitung
+//    sebagai satu pantulan.
+//
+// Posisi hasil prediksi tidak pernah masuk ke fungsi ini.
 
 function updateBounce(tr, rawY, t) {
 
-  const scale = poseCtx.scale;
-  const h = tr.hF * scale;
-  const minAmp = tr.aF * scale;
+  const scale = Math.max(
+    poseCtx.scale || 0.25,
+    0.10
+  );
 
-  let bs = tr.bs;
+  const directionThreshold = Math.max(
+    0.003,
+    BOUNCE_DIRECTION_THRESHOLD * scale
+  );
 
-  // Sumber hilang terlalu lama: reset agar tidak ada pantulan palsu.
-  if (t - bs.lastSeenT > MAX_GAP_MS) {
-    const keepBounceT = bs.lastBounceT;
-    bs = tr.bs = newBallState();
-    bs.lastBounceT = keepBounceT;
+  const minimumAmplitude = Math.max(
+    0.025,
+    BOUNCE_MIN_AMPLITUDE * scale
+  );
+
+  let state = tr.state;
+
+  // Jika deteksi terputus terlalu lama, mulai pelacakan baru.
+  // Waktu pantulan terakhir dipertahankan untuk mencegah
+  // dua hitungan terlalu berdekatan.
+  if (
+    t - state.lastSeenT > MAX_TRACK_GAP_MS
+  ) {
+
+    const previousBounceTime = state.lastBounceT;
+
+    state = newBallState();
+    state.lastBounceT = previousBounceTime;
+
+    tr.state = state;
   }
 
-  bs.lastSeenT = t;
+  state.lastSeenT = t;
 
-  bs.smoothY = bs.smoothY === null
-    ? rawY
-    : bs.smoothY * 0.5 + rawY * 0.5;
+  // EMA untuk mengurangi getaran posisi antar-frame.
+  state.smoothY =
+    state.smoothY === null
+      ? rawY
+      : state.smoothY * 0.55 + rawY * 0.45;
 
-  const y = bs.smoothY;
+  const y = state.smoothY;
 
-  if (!bs.init) {
-    bs.init = true;
-    bs.dir = 0;
-    bs.extY = y;
-    bs.extT = t;
+  // Inisialisasi.
+  if (!state.initialized) {
+
+    state.initialized = true;
+    state.previousY = y;
+    state.phase = "seekDown";
+
+    state.topY = y;
+    state.bottomY = y;
+
     return;
   }
 
-  if (bs.dir === 0) {
+  const previousY = state.previousY;
 
-    if (y - bs.extY > h) {
-      bs.dir = 1; bs.extY = y; bs.extT = t;
-    } else if (bs.extY - y > h) {
-      bs.dir = -1; bs.extY = y; bs.extT = t;
+  // ----------------------------------------------------
+  // FASE 1: MENUNGGU GERAKAN TURUN
+  // ----------------------------------------------------
+
+  if (state.phase === "seekDown") {
+
+    if (y - previousY >= directionThreshold) {
+
+      state.phase = "down";
+
+      // Titik awal lintasan turun.
+      state.topY = previousY;
+      state.bottomY = y;
     }
 
-  } else if (bs.dir === 1) {
+  }
 
-    if (y > bs.extY) {
+  // ----------------------------------------------------
+  // FASE 2: BOLA SEDANG TURUN
+  // ----------------------------------------------------
 
-      bs.extY = y;
-      bs.extT = t;
+  else if (state.phase === "down") {
 
-    } else if (bs.extY - y > h) {
+    // Simpan titik paling rendah.
+    if (y > state.bottomY) {
+      state.bottomY = y;
+    }
 
-      const contactY = bs.extY;
-      const topY = bs.lastTopY;
+    // Perubahan arah turun menjadi naik.
+    const upwardMovement =
+      state.bottomY - y;
 
-      if (
-        topY !== null &&
-        contactY - topY >= minAmp &&
-        bs.extT - bs.lastBounceT >= MIN_BOUNCE_GAP_MS
-      ) {
+    if (upwardMovement >= directionThreshold) {
 
-        bs.lastBounceT = bs.extT;
+      const amplitude =
+        state.bottomY - state.topY;
+
+      const enoughAmplitude =
+        amplitude >= minimumAmplitude;
+
+      const enoughTime =
+        t - state.lastBounceT >= MIN_BOUNCE_GAP_MS;
+
+      if (enoughAmplitude && enoughTime) {
+
+        state.lastBounceT = t;
 
         if (testActive) {
 
+          const relativeHeight =
+            amplitude / scale;
+
+          const lowBounce =
+            poseCtx.hipY !== null
+              ? state.topY >= poseCtx.hipY
+              : null;
+
           tr.list.push({
-            t: bs.extT,
-            heightRel: (contactY - topY) / scale,
-            low:
-              poseCtx.hipY !== null
-                ? topY >= poseCtx.hipY - tr.lowTol * scale
-                : null
+            t,
+            heightRel: relativeHeight,
+            low: lowBounce
           });
 
           bounceCountDisplay.textContent =
-            ballTr.list.length + " / " + wristTr.list.length;
+            String(tr.list.length);
         }
       }
 
-      bs.dir = -1;
-      bs.extY = y;
-      bs.extT = t;
-    }
-
-  } else {
-
-    if (y < bs.extY) {
-
-      bs.extY = y;
-      bs.extT = t;
-
-    } else if (y - bs.extY > h) {
-
-      bs.lastTopY = bs.extY;
-      bs.dir = 1;
-      bs.extY = y;
-      bs.extT = t;
+      // Setelah perubahan arah terkonfirmasi,
+      // bola masuk fase naik.
+      state.phase = "up";
+      state.topY = y;
     }
   }
+
+  // ----------------------------------------------------
+  // FASE 3: BOLA SEDANG NAIK
+  // ----------------------------------------------------
+
+  else if (state.phase === "up") {
+
+    // Titik tertinggi lintasan naik.
+    if (y < state.topY) {
+      state.topY = y;
+    }
+
+    // Bola kembali bergerak turun.
+    if (y - state.topY >= directionThreshold) {
+
+      state.phase = "down";
+
+      // Titik tertinggi menjadi awal lintasan turun.
+      state.bottomY = y;
+    }
+  }
+
+  state.previousY = y;
 }
 
-// ===== MENAMPILKAN NILAI PENGUKURAN =====
+// ======================================================
+// MENAMPILKAN NILAI PENGUKURAN
+// ======================================================
 
 function setMetric(element, value, suffix = "°") {
+
   element.textContent =
     value === null || !Number.isFinite(value)
-      ? "--" : Math.round(value) + suffix;
+      ? "--"
+      : Math.round(value) + suffix;
 }
 
-// ===== MENGGAMBAR TITIK TUBUH DAN TANGAN =====
+// ======================================================
+// MENGGAMBAR TITIK TUBUH DAN TANGAN
+// ======================================================
 
 function drawLandmarks(poseResult, handResult) {
 
   if (poseResult.landmarks?.length) {
+
     for (const lm of poseResult.landmarks) {
-      drawingUtils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS,
-        { color: "#B266FF", lineWidth: 4 });
-      drawingUtils.drawLandmarks(lm,
-        { color: "#FF3030", lineWidth: 2, radius: 4 });
+
+      drawingUtils.drawConnectors(
+        lm,
+        PoseLandmarker.POSE_CONNECTIONS,
+        {
+          color: "#B266FF",
+          lineWidth: 4
+        }
+      );
+
+      drawingUtils.drawLandmarks(
+        lm,
+        {
+          color: "#FF3030",
+          lineWidth: 2,
+          radius: 4
+        }
+      );
     }
   }
 
   if (handResult.landmarks?.length) {
+
     for (const hand of handResult.landmarks) {
-      drawingUtils.drawConnectors(hand, HandLandmarker.HAND_CONNECTIONS,
-        { color: "#B266FF", lineWidth: 3 });
-      drawingUtils.drawLandmarks(hand,
-        { color: "#FF3030", fillColor: "#FF3030", lineWidth: 2, radius: 4 });
+
+      drawingUtils.drawConnectors(
+        hand,
+        HandLandmarker.HAND_CONNECTIONS,
+        {
+          color: "#B266FF",
+          lineWidth: 3
+        }
+      );
+
+      drawingUtils.drawLandmarks(
+        hand,
+        {
+          color: "#FF3030",
+          fillColor: "#FF3030",
+          lineWidth: 2,
+          radius: 4
+        }
+      );
     }
   }
 }
 
-// ===== MEMULAI TES 30 DETIK =====
+// ======================================================
+// MEMULAI TES 30 DETIK
+// ======================================================
 
 function startTest() {
 
   if (!isRunning || testActive) return;
 
   testSamples = [];
+
   ballTr.list = [];
-  wristTr.list = [];
-  ballTr.bs = newBallState();
-  wristTr.bs = newBallState();
+  ballTr.state = newBallState();
+
   lastBall = null;
+
+  poseCtx = {
+    hipY: null,
+    kneeY: null,
+    scale: 0.25
+  };
 
   testActive = true;
   testStartTime = performance.now();
 
   resultPanel.style.display = "none";
-  startTestButton.disabled = true;
-  bounceCountDisplay.textContent = "0 / 0";
 
-  liveTimerDisplay.textContent = "Durasi tes: 30 detik";
-  statusBox.textContent = "Tes dimulai. Lakukan low dribbling di depan kamera.";
+  startTestButton.disabled = true;
+
+  bounceCountDisplay.textContent = "0";
+
+  liveTimerDisplay.textContent =
+    "Durasi tes: 30 detik";
+
+  statusBox.textContent =
+    "Tes dimulai. Lakukan low dribbling di depan kamera.";
 }
 
-// ===== MEREKAM DATA PENGUKURAN (SETIAP FRAME) =====
+// ======================================================
+// MEREKAM DATA PENGUKURAN
+// ======================================================
 
-function sampleMeasurements(measurements, handInfo, ball) {
+function sampleMeasurements(
+  measurements,
+  handInfo,
+  ball
+) {
 
   if (!testActive) return;
 
   testSamples.push({
+
     lean: measurements?.lean ?? null,
+
     knee: measurements?.knee ?? null,
-    handInZone: handInfo ? handInfo.withinZone : null,
+
+    handInZone:
+      handInfo
+        ? handInfo.withinZone
+        : null,
+
     poseValid:
       !!measurements &&
       measurements.lean !== null &&
       measurements.knee !== null,
+
     handValid: !!handInfo,
+
+    // Hanya bola aktual yang dihitung.
     ballValid: !!ball
   });
 }
 
-// ===== SKOR =====
-// Seluruh ambang sementara. Harus ditinjau ahli materi.
+// ======================================================
+// PERHITUNGAN SKOR
+// ======================================================
+
+// Seluruh ambang skor masih bersifat sementara.
 
 function rateScore(values, min, max) {
+
   const valid = values.filter(Number.isFinite);
+
   if (!valid.length) return null;
+
   return Math.round(
-    valid.filter(v => v >= min && v <= max).length / valid.length * 100
+    valid.filter(v => v >= min && v <= max).length /
+    valid.length * 100
   );
 }
 
-const scoreLean = v => rateScore(v, 8, 35);
-const scoreKnee = v => rateScore(v, 100, 150);
+const scoreLean = values =>
+  rateScore(values, 8, 35);
+
+const scoreKnee = values =>
+  rateScore(values, 100, 150);
 
 function scoreHand(samples) {
-  const valid = samples.filter(s => s.handInZone !== null);
+
+  const valid = samples.filter(
+    s => s.handInZone !== null
+  );
+
   if (!valid.length) return null;
+
   return Math.round(
-    valid.filter(s => s.handInZone).length / valid.length * 100
+    valid.filter(s => s.handInZone).length /
+    valid.length * 100
   );
 }
 
 function scoreStability(values) {
+
   const valid = values.filter(Number.isFinite);
+
   if (valid.length < 2) return null;
+
   const avg = mean(valid);
-  const sd = Math.sqrt(mean(valid.map(v => (v - avg) ** 2)));
-  return Math.round(clamp(100 - sd * 2.5));
+
+  const sd = Math.sqrt(
+    mean(valid.map(v => (v - avg) ** 2))
+  );
+
+  return Math.round(
+    clamp(100 - sd * 2.5)
+  );
 }
 
-// Jumlah pantulan terhadap target.
 function scoreBounce(list) {
-  return Math.round(clamp(list.length / TARGET_BOUNCES * 100));
+
+  return Math.round(
+    clamp(list.length / TARGET_BOUNCES * 100)
+  );
 }
 
-// Persentase pantulan dengan puncak bola di bawah pinggul.
 function scoreLow(list) {
-  const valid = list.filter(b => b.low !== null);
+
+  const valid = list.filter(
+    b => b.low !== null
+  );
+
   if (!valid.length) return null;
-  return Math.round(valid.filter(b => b.low).length / valid.length * 100);
+
+  return Math.round(
+    valid.filter(b => b.low).length /
+    valid.length * 100
+  );
 }
 
-// Konsistensi tinggi pantulan (koefisien variasi).
 function scoreConsistency(list) {
-  const hs = list.map(b => b.heightRel);
-  const avg = mean(hs);
-  if (hs.length < 2 || !avg) return null;
-  const sd = Math.sqrt(mean(hs.map(v => (v - avg) ** 2)));
-  return Math.round(clamp(100 - (sd / avg) * 100));
+
+  const heights = list.map(
+    b => b.heightRel
+  );
+
+  const avg = mean(heights);
+
+  if (heights.length < 2 || !avg) {
+    return null;
+  }
+
+  const sd = Math.sqrt(
+    mean(heights.map(v => (v - avg) ** 2))
+  );
+
+  return Math.round(
+    clamp(100 - (sd / avg) * 100)
+  );
 }
 
-// ===== MENYELESAIKAN TES DAN MENGHITUNG NILAI =====
+// ======================================================
+// HASIL TIDAK VALID
+// ======================================================
 
 function showInvalid(message) {
 
   statusBox.textContent = message;
+
   resultPanel.style.display = "block";
+
   $("finalScore").textContent = "--";
 
   $("feedbackText").textContent =
-    "Hasil tidak diterbitkan karena data yang terbaca belum mencukupi. Pastikan seluruh tubuh, setidaknya satu tangan, dan bola terlihat jelas selama tes.";
+    "Hasil tidak diterbitkan karena data yang terbaca belum mencukupi. " +
+    "Pastikan tubuh, setidaknya satu tangan, dan bola terlihat jelas selama tes.";
 
   [
-    "scoreLean", "scoreKnee", "scoreHand", "scoreStability",
-    "scoreBounce", "scoreLow", "scoreConsistency"
-  ].forEach(id => { $(id).textContent = "--"; });
+    "scoreLean",
+    "scoreKnee",
+    "scoreHand",
+    "scoreStability",
+    "scoreBounce",
+    "scoreLow",
+    "scoreConsistency"
+  ].forEach(id => {
+    $(id).textContent = "--";
+  });
 }
+
+// ======================================================
+// MENYELESAIKAN TES
+// ======================================================
 
 function finishTest() {
 
   testActive = false;
+
   startTestButton.disabled = !isRunning;
 
-  const total = Math.max(1, testSamples.length);
-  const poseSamples = testSamples.filter(s => s.poseValid);
+  const total = Math.max(
+    1,
+    testSamples.length
+  );
 
-  const poseCoverage = poseSamples.length / total;
-  const handCoverage = testSamples.filter(s => s.handValid).length / total;
-  const ballCoverage = testSamples.filter(s => s.ballValid).length / total;
+  const poseSamples = testSamples.filter(
+    s => s.poseValid
+  );
 
-  liveTimerDisplay.textContent = "Durasi tes: selesai";
+  const poseCoverage =
+    poseSamples.length / total;
 
-  // Sumber pantulan: bola jika cakupannya cukup, jika tidak memakai tangan.
+  const handCoverage =
+    testSamples.filter(s => s.handValid).length /
+    total;
+
+  const ballCoverage =
+    testSamples.filter(s => s.ballValid).length /
+    total;
+
+  liveTimerDisplay.textContent =
+    "Durasi tes: selesai";
+
+  // Pantulan hanya sah jika berasal dari bola aktual.
   const ballOk =
     ballCoverage >= MIN_BALL_COVERAGE &&
     ballTr.list.length >= MIN_BOUNCES;
-  const wristOk = wristTr.list.length >= MIN_BOUNCES;
-  const useBall = ballOk;
-  const bounces = useBall ? ballTr.list : wristTr.list;
 
   if (
     testSamples.length < MIN_SAMPLES ||
     poseCoverage < MIN_POSE_COVERAGE ||
     handCoverage < MIN_HAND_COVERAGE ||
-    (!ballOk && !wristOk)
+    !ballOk
   ) {
+
     showInvalid(
-      "Tes belum valid: tubuh, tangan, atau bola terlalu sering tidak terbaca. Perbaiki posisi dan pencahayaan, lalu ulangi."
+      "Tes belum valid: deteksi tubuh, tangan, atau bola belum mencukupi. " +
+      "Pastikan bola terlihat jelas dan tidak tertutup selama tes, " +
+      "kemudian ulangi."
     );
+
     return;
   }
 
   const scores = {
-    lean: scoreLean(poseSamples.map(s => s.lean)),
-    knee: scoreKnee(poseSamples.map(s => s.knee)),
+
+    lean: scoreLean(
+      poseSamples.map(s => s.lean)
+    ),
+
+    knee: scoreKnee(
+      poseSamples.map(s => s.knee)
+    ),
+
     hand: scoreHand(testSamples),
-    stability: scoreStability(poseSamples.map(s => s.lean)),
-    bounce: scoreBounce(bounces),
-    low: scoreLow(bounces),
-    consistency: scoreConsistency(bounces)
+
+    stability: scoreStability(
+      poseSamples.map(s => s.lean)
+    ),
+
+    bounce: scoreBounce(ballTr.list),
+
+    low: scoreLow(ballTr.list),
+
+    consistency: scoreConsistency(ballTr.list)
   };
 
-  if (Object.values(scores).some(v => v === null)) {
-    statusBox.textContent =
-      "Data belum cukup untuk menghitung semua indikator. Silakan ulangi tes.";
+  if (
+    Object.values(scores).some(
+      value => value === null
+    )
+  ) {
+
+    showInvalid(
+      "Data belum cukup untuk menghitung seluruh indikator. " +
+      "Silakan ulangi tes dengan posisi tubuh, tangan, dan bola terlihat jelas."
+    );
+
     return;
   }
 
-  // Bobot sementara, indikator bola lebih besar dari postur.
-  // Pantulan 20, rendah 20, konsistensi 15, tangan 15,
-  // lutut 10, postur 10, stabilitas 10.
-  // Bobot harus disetujui ahli.
+  // Bobot sementara:
+  // Pantulan 20%, pantulan rendah 20%,
+  // konsistensi 15%, tangan 15%,
+  // lutut 10%, postur 10%, stabilitas 10%.
 
   const finalScore = Math.round(
+
     scores.bounce * 0.20 +
+
     scores.low * 0.20 +
+
     scores.consistency * 0.15 +
+
     scores.hand * 0.15 +
+
     scores.knee * 0.10 +
+
     scores.lean * 0.10 +
+
     scores.stability * 0.10
   );
 
   $("finalScore").textContent = finalScore;
+
   $("scoreLean").textContent = scores.lean;
   $("scoreKnee").textContent = scores.knee;
   $("scoreHand").textContent = scores.hand;
@@ -925,44 +1247,71 @@ function finishTest() {
   $("scoreConsistency").textContent = scores.consistency;
 
   // Umpan balik otomatis.
-
   const tips = [];
 
-  if (scores.bounce < 70) tips.push("Tingkatkan frekuensi dribbling agar jumlah pantulan lebih banyak.");
-  if (scores.low < 70) tips.push("Jaga pantulan bola tetap rendah, di bawah pinggul.");
-  if (scores.consistency < 70) tips.push("Usahakan tinggi pantulan lebih seragam.");
-  if (scores.lean < 70) tips.push("Perhatikan posisi badan agar sedikit condong ke depan secara nyaman.");
-  if (scores.knee < 70) tips.push("Latih posisi lutut lebih menekuk dan jangan terlalu tegak.");
-  if (scores.hand < 70) tips.push("Perhatikan posisi tangan aktif di area antara pinggul dan lutut.");
-  if (scores.stability < 70) tips.push("Usahakan posisi badan lebih terkendali selama latihan.");
-
-  if (!tips.length) {
-    tips.push("Pola dribbling yang terbaca sudah cukup baik dan konsisten. Pertahankan latihan.");
+  if (scores.bounce < 70) {
+    tips.push(
+      "Tingkatkan frekuensi dribbling agar jumlah pantulan lebih banyak."
+    );
   }
 
-  const nb = ballTr.list.length;
-  const nw = wristTr.list.length;
+  if (scores.low < 70) {
+    tips.push(
+      "Jaga pantulan bola tetap rendah, di bawah pinggul."
+    );
+  }
 
-  const srcText = useBall
-    ? "dari bola"
-    : "dari gerak tangan karena bola kurang terbaca";
+  if (scores.consistency < 70) {
+    tips.push(
+      "Usahakan tinggi pantulan lebih seragam."
+    );
+  }
 
-  const warn =
-    nb && nw && Math.abs(nb - nw) / Math.max(nb, nw) > 0.25
-      ? " Peringatan: hitungan bola (" + nb + ") dan tangan (" + nw +
-        ") berbeda cukup jauh, periksa dengan video."
-      : "";
+  if (scores.lean < 70) {
+    tips.push(
+      "Perhatikan posisi badan agar sedikit condong ke depan secara nyaman."
+    );
+  }
+
+  if (scores.knee < 70) {
+    tips.push(
+      "Latih posisi lutut lebih menekuk dan jangan terlalu tegak."
+    );
+  }
+
+  if (scores.hand < 70) {
+    tips.push(
+      "Perhatikan posisi tangan aktif di area antara pinggul dan lutut."
+    );
+  }
+
+  if (scores.stability < 70) {
+    tips.push(
+      "Usahakan posisi badan lebih terkendali selama latihan."
+    );
+  }
+
+  if (!tips.length) {
+    tips.push(
+      "Pola gerakan yang terbaca sudah cukup baik dan konsisten. Pertahankan latihan."
+    );
+  }
 
   $("feedbackText").textContent =
-    "Umpan balik sistem: Terhitung " + bounces.length +
-    " pantulan dalam 30 detik (" + srcText + ")." + warn + " " +
+    "Umpan balik sistem: Terhitung " +
+    ballTr.list.length +
+    " pantulan bola dalam 30 detik. " +
     tips.join(" ");
 
   resultPanel.style.display = "block";
-  statusBox.textContent = "Tes selesai. Skor analisis gerakan berhasil dihitung otomatis.";
+
+  statusBox.textContent =
+    "Tes selesai. Skor analisis gerakan berhasil dihitung otomatis.";
 }
 
-// ===== MENGAKTIFKAN KAMERA =====
+// ======================================================
+// MENGAKTIFKAN KAMERA
+// ======================================================
 
 async function startCamera() {
 
@@ -974,34 +1323,62 @@ async function startCamera() {
   try {
 
     if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error("Kamera membutuhkan HTTPS dan izin browser.");
+
+      throw new Error(
+        "Kamera membutuhkan HTTPS dan izin browser."
+      );
     }
 
-    statusBox.textContent = "Meminta izin kamera...";
+    statusBox.textContent =
+      "Meminta izin kamera...";
 
-    cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: "user",
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        frameRate: { ideal: 30 }
-      },
-      audio: false
-    });
+    cameraStream =
+      await navigator.mediaDevices.getUserMedia({
+
+        video: {
+
+          facingMode: "user",
+
+          width: {
+            ideal: 1280
+          },
+
+          height: {
+            ideal: 720
+          },
+
+          frameRate: {
+            ideal: 30
+          }
+        },
+
+        audio: false
+      });
 
     video.srcObject = cameraStream;
+
     await video.play();
 
     if (!video.videoWidth) {
+
       await new Promise(resolve => {
-        video.addEventListener("loadedmetadata", resolve, { once: true });
+
+        video.addEventListener(
+          "loadedmetadata",
+          resolve,
+          { once: true }
+        );
       });
     }
 
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 
-    if (!poseLandmarker || !handLandmarker || !objectDetector) {
+    if (
+      !poseLandmarker ||
+      !handLandmarker ||
+      !objectDetector
+    ) {
       await initializeModels();
     }
 
@@ -1021,8 +1398,11 @@ async function startCamera() {
   } catch (e) {
 
     console.error(e);
+
     stopCamera();
-    statusBox.textContent = "Gagal mengaktifkan kamera/model: " + e.message;
+
+    statusBox.textContent =
+      "Gagal mengaktifkan kamera/model: " + e.message;
 
   } finally {
 
@@ -1031,7 +1411,9 @@ async function startCamera() {
   }
 }
 
-// ===== PROSES DETEKSI KAMERA =====
+// ======================================================
+// PROSES DETEKSI KAMERA
+// ======================================================
 
 function renderLoop() {
 
@@ -1039,37 +1421,73 @@ function renderLoop() {
 
   try {
 
-    if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+    if (
+      video.readyState >= 2 &&
+      video.currentTime !== lastVideoTime
+    ) {
 
       lastVideoTime = video.currentTime;
 
       const now = performance.now();
 
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // DETEKSI TUBUH, TANGAN, DAN BOLA
+      ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
 
-      const poseResult = poseLandmarker.detectForVideo(video, now);
-      const handResult = handLandmarker.detectForVideo(video, now);
-      const ballResult = objectDetector.detectForVideo(video, now);
+      // Deteksi tubuh, tangan, dan bola.
+      const poseResult =
+        poseLandmarker.detectForVideo(video, now);
 
-      drawLandmarks(poseResult, handResult);
+      const handResult =
+        handLandmarker.detectForVideo(video, now);
 
-      let ball = pickBall(ballResult, now);
-      if (!ball) ball = findOrangeBall(now);
-      if (ball) trackBall(ball, now);
+      const ballResult =
+        objectDetector.detectForVideo(video, now);
 
-      // Jika deteksi putus sebentar, posisi bola diperkirakan.
-      // Perkiraan hanya dipakai untuk pelacak pantulan dan tidak
-      // dihitung sebagai bola terbaca pada pemeriksaan validitas.
-      const est = ball ? null : predictBall(now);
-      drawBall(ball || est);
+      drawLandmarks(
+        poseResult,
+        handResult
+      );
+
+      // Deteksi bola aktual.
+      const ball = pickBall(
+        ballResult,
+        now
+      );
+
+      if (ball) {
+
+        trackBall(ball, now);
+
+        drawBall(ball);
+
+        ballStatusDisplay.textContent =
+          "Terbaca";
+
+        // Hanya bola aktual yang masuk penghitungan.
+        updateBounce(
+          ballTr,
+          ball.y,
+          now
+        );
+
+      } else {
+
+        ballStatusDisplay.textContent =
+          "Hilang";
+      }
 
       let measurements = null;
       let handInfo = null;
 
+      // ------------------------------------------------
       // ANALISIS TUBUH
+      // ------------------------------------------------
 
       if (poseResult.landmarks?.length) {
 
@@ -1077,42 +1495,75 @@ function renderLoop() {
 
         measurements = analyzePose(lm);
 
-        setMetric(leftKneeDisplay, measurements.leftKnee);
-        setMetric(rightKneeDisplay, measurements.rightKnee);
-        setMetric(bodyLeanDisplay, measurements.lean);
+        setMetric(
+          leftKneeDisplay,
+          measurements.leftKnee
+        );
 
-        visibilityDisplay.textContent = "Tubuh terdeteksi.";
+        setMetric(
+          rightKneeDisplay,
+          measurements.rightKnee
+        );
 
-        // Perbarui konteks untuk pelacak bola
+        setMetric(
+          bodyLeanDisplay,
+          measurements.lean
+        );
+
+        visibilityDisplay.textContent =
+          "Tubuh terdeteksi.";
+
+        // Perbarui konteks pinggul dan lutut.
         poseCtx.hipY =
           visible(lm[23]) && visible(lm[24])
-            ? (lm[23].y + lm[24].y) / 2 : poseCtx.hipY;
+            ? (lm[23].y + lm[24].y) / 2
+            : poseCtx.hipY;
 
         poseCtx.kneeY =
           visible(lm[25]) && visible(lm[26])
-            ? (lm[25].y + lm[26].y) / 2 : poseCtx.kneeY;
+            ? (lm[25].y + lm[26].y) / 2
+            : poseCtx.kneeY;
 
-        if (measurements.torso) poseCtx.scale = measurements.torso;
+        if (
+          measurements.torso &&
+          Number.isFinite(measurements.torso)
+        ) {
 
-        trackWrist(lm, now);
+          poseCtx.scale =
+            measurements.torso;
+        }
 
       } else {
 
         leftKneeDisplay.textContent = "--";
         rightKneeDisplay.textContent = "--";
         bodyLeanDisplay.textContent = "--";
-        visibilityDisplay.textContent = "Tubuh belum terbaca.";
+
+        visibilityDisplay.textContent =
+          "Tubuh belum terbaca.";
       }
 
+      // ------------------------------------------------
       // ANALISIS TANGAN
+      // ------------------------------------------------
 
-      if (handResult.landmarks?.length && poseResult.landmarks?.length) {
+      if (
+        handResult.landmarks?.length &&
+        poseResult.landmarks?.length
+      ) {
 
-        handInfo = analyzeHands(handResult, poseResult.landmarks[0]);
+        handInfo = analyzeHands(
+          handResult,
+          poseResult.landmarks[0]
+        );
 
         handPositionDisplay.textContent =
           handInfo
-            ? (handInfo.withinZone ? "Area pinggul–lutut" : "Di luar area")
+            ? (
+                handInfo.withinZone
+                  ? "Area pinggul–lutut"
+                  : "Di luar area"
+              )
             : "--";
 
       } else {
@@ -1120,33 +1571,30 @@ function renderLoop() {
         handPositionDisplay.textContent = "--";
       }
 
-      // ANALISIS BOLA DAN PANTULAN
-
-      if (ball) {
-        ballStatusDisplay.textContent =
-          ball.source === "warna" ? "Warna" : "Terbaca";
-        updateBounce(ballTr, ball.y, now);
-      } else if (est) {
-        ballStatusDisplay.textContent = "Estimasi";
-        updateBounce(ballTr, est.y, now);
-      } else {
-        ballStatusDisplay.textContent = "Hilang";
-      }
-
+      // ------------------------------------------------
       // PENGAMBILAN DATA TES
+      // ------------------------------------------------
 
       if (testActive) {
 
-        const elapsed = now - testStartTime;
+        const elapsed =
+          now - testStartTime;
 
         const remaining = Math.max(
           0,
-          Math.ceil((TEST_DURATION_MS - elapsed) / 1000)
+          Math.ceil(
+            (TEST_DURATION_MS - elapsed) / 1000
+          )
         );
 
-        liveTimerDisplay.textContent = "Sisa waktu: " + remaining + " detik";
+        liveTimerDisplay.textContent =
+          "Sisa waktu: " + remaining + " detik";
 
-        sampleMeasurements(measurements, handInfo, ball);
+        sampleMeasurements(
+          measurements,
+          handInfo,
+          ball
+        );
 
         if (elapsed >= TEST_DURATION_MS) {
           finishTest();
@@ -1156,18 +1604,28 @@ function renderLoop() {
 
   } catch (e) {
 
-    console.error("Kesalahan analisis:", e);
-    statusBox.textContent = "Kesalahan analisis: " + e.message;
+    console.error(
+      "Kesalahan analisis:",
+      e
+    );
+
+    statusBox.textContent =
+      "Kesalahan analisis: " + e.message;
+
     stopCamera();
+
     return;
   }
 
   if (isRunning) {
-    animationId = requestAnimationFrame(renderLoop);
+    animationId =
+      requestAnimationFrame(renderLoop);
   }
 }
 
-// ===== MEMATIKAN KAMERA =====
+// ======================================================
+// MEMATIKAN KAMERA
+// ======================================================
 
 function stopCamera() {
 
@@ -1175,42 +1633,81 @@ function stopCamera() {
   testActive = false;
 
   if (animationId !== null) {
+
     cancelAnimationFrame(animationId);
+
     animationId = null;
   }
 
   if (cameraStream) {
-    cameraStream.getTracks().forEach(track => track.stop());
+
+    cameraStream
+      .getTracks()
+      .forEach(track => track.stop());
+
     cameraStream = null;
   }
 
   video.srcObject = null;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  ctx.clearRect(
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
 
   startButton.disabled = isInitializing;
   startTestButton.disabled = true;
   stopButton.disabled = true;
 
-  liveTimerDisplay.textContent = "Durasi tes: belum dimulai";
+  liveTimerDisplay.textContent =
+    "Durasi tes: belum dimulai";
 
   [
-    leftKneeDisplay, rightKneeDisplay, bodyLeanDisplay,
-    handPositionDisplay, ballStatusDisplay, bounceCountDisplay
-  ].forEach(el => { el.textContent = "--"; });
+    leftKneeDisplay,
+    rightKneeDisplay,
+    bodyLeanDisplay,
+    handPositionDisplay,
+    ballStatusDisplay,
+    bounceCountDisplay
+  ].forEach(element => {
+    element.textContent = "--";
+  });
 
-  visibilityDisplay.textContent = "Menunggu deteksi tubuh...";
+  visibilityDisplay.textContent =
+    "Menunggu deteksi tubuh...";
 
   if (!isInitializing) {
-    statusBox.textContent = "Kamera telah dimatikan.";
+
+    statusBox.textContent =
+      "Kamera telah dimatikan.";
   }
 }
 
-// ===== EVENT TOMBOL =====
+// ======================================================
+// EVENT TOMBOL
+// ======================================================
 
-startButton.addEventListener("click", startCamera);
-startTestButton.addEventListener("click", startTest);
-stopButton.addEventListener("click", stopCamera);
-window.addEventListener("beforeunload", stopCamera);
+startButton.addEventListener(
+  "click",
+  startCamera
+);
+
+startTestButton.addEventListener(
+  "click",
+  startTest
+);
+
+stopButton.addEventListener(
+  "click",
+  stopCamera
+);
+
+window.addEventListener(
+  "beforeunload",
+  stopCamera
+);
 
 </script>
 </body>
