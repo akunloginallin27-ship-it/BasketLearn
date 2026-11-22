@@ -69,7 +69,7 @@ button:disabled { opacity: .48; cursor: not-allowed; }
     <div class="metric-row"><span>Kemiringan badan</span><span class="metric-value" id="bodyLean">--</span></div>
     <div class="metric-row"><span>Posisi tangan</span><span class="metric-value" id="handPosition">--</span></div>
     <div class="metric-row"><span>Bola</span><span class="metric-value" id="ballStatus">--</span></div>
-    <div class="metric-row"><span>Pantulan</span><span class="metric-value" id="bounceCount">--</span></div>
+    <div class="metric-row"><span>Pantulan (bola/tangan)</span><span class="metric-value" id="bounceCount">--</span></div>
     <div class="metric-note" id="visibility">Menunggu deteksi tubuh...</div>
     <div class="metric-note" id="liveTimer">Durasi tes: belum dimulai</div>
   </div>
@@ -108,7 +108,8 @@ button:disabled { opacity: .48; cursor: not-allowed; }
 
 <p class="note">
   Catatan: V7 adalah prototipe teknis. Pantulan dihitung dari pola
-  gerak vertikal bola yang terbaca kamera. Ambang dan bobot penilaian
+  gerak vertikal bola yang terbaca kamera. Jika bola kurang terbaca,
+  hitungan memakai gerak pergelangan tangan sebagai cadangan. Ambang dan bobot penilaian
   masih sementara dan harus ditinjau ahli materi, serta hasil hitungan
   sistem perlu divalidasi dengan hitungan manual dari video sebelum
   digunakan sebagai instrumen penelitian. Jika tubuh, tangan, atau bola
@@ -178,19 +179,25 @@ const MAX_GAP_MS = 250;         // bola hilang lebih lama dari ini = reset pelac
 const MIN_SAMPLES = 150;        // minimal frame terekam
 const MIN_POSE_COVERAGE = 0.65;
 const MIN_HAND_COVERAGE = 0.40;
-const MIN_BALL_COVERAGE = 0.40;
+const MIN_BALL_COVERAGE = 0.50;
 const MIN_BOUNCES = 5;
 
 let testActive = false;
 let testStartTime = 0;
 let testSamples = [];
-let bounces = [];
+
+// Dua pelacak pantulan terpisah: dari bola dan dari pergelangan tangan.
+// hF = histeresis, aF = amplitudo minimum, lowTol = toleransi pantulan rendah
+// (semua dikali panjang torso). Nilai sementara.
+const ballTr = { bs: null, list: [], hF: 0.12, aF: 0.25, lowTol: 0 };
+const wristTr = { bs: null, list: [], hF: 0.10, aF: 0.15, lowTol: 0.1 };
 
 // Konteks pose terbaru untuk pelacak bola
 let poseCtx = { hipY: null, kneeY: null, scale: 0.25 };
 
 // Status pelacak pantulan
-let bs = newBallState();
+ballTr.bs = newBallState();
+wristTr.bs = newBallState();
 
 function newBallState() {
   return {
@@ -469,6 +476,132 @@ function drawBall(ball) {
   ctx.setLineDash([]);
 }
 
+// ===== DETEKSI WARNA ORANYE (CADANGAN) =====
+
+// Dipakai saat model gagal membaca bola. Pencarian dibatasi pada area
+// di sekitar posisi bola terakhir atau pergelangan tangan, supaya warna
+// lain di latar tidak ikut terbaca. Sensitif terhadap cahaya dan warna
+// kulit atau baju yang mirip oranye.
+
+const colorCanvas = document.createElement("canvas");
+colorCanvas.width = 160;
+colorCanvas.height = 90;
+const colorCtx = colorCanvas.getContext("2d", { willReadFrequently: true });
+
+let wristRef = null;
+
+function findOrangeBall(now) {
+
+  if (!video.videoWidth) return null;
+
+  const ref =
+    lastBall && now - lastBall.t < 600
+      ? { x: lastBall.x, y: lastBall.y }
+      : wristRef;
+
+  if (!ref) return null;
+
+  const W = 160;
+  const H = 90;
+
+  colorCtx.drawImage(video, 0, 0, W, H);
+
+  const x0 = Math.max(0, Math.floor((ref.x - 0.2) * W));
+  const x1 = Math.min(W, Math.ceil((ref.x + 0.2) * W));
+  const y0 = Math.max(0, Math.floor((ref.y - 0.35) * H));
+  const y1 = Math.min(H, Math.ceil((ref.y + 0.35) * H));
+
+  if (x1 - x0 < 2 || y1 - y0 < 2) return null;
+
+  const data = colorCtx.getImageData(x0, y0, x1 - x0, y1 - y0);
+  const px = data.data;
+
+  let sx = 0, sy = 0, n = 0;
+
+  for (let i = 0; i < px.length; i += 4) {
+
+    const r = px[i], g = px[i + 1], b = px[i + 2];
+    const mx = Math.max(r, g, b);
+    const d = mx - Math.min(r, g, b);
+
+    if (d === 0) continue;
+
+    const sat = d / mx;
+    if (sat < 0.55 || mx / 255 < 0.35) continue;
+
+    let hue;
+    if (mx === r) hue = ((g - b) / d) % 6;
+    else if (mx === g) hue = (b - r) / d + 2;
+    else hue = (r - g) / d + 4;
+
+    hue *= 60;
+    if (hue < 0) hue += 360;
+    if (hue < 5 || hue > 30) continue;
+
+    const idx = i / 4;
+    sx += x0 + (idx % (x1 - x0));
+    sy += y0 + Math.floor(idx / (x1 - x0));
+    n++;
+  }
+
+  if (n < 8) return null;
+
+  const x = (sx / n) / W;
+  const y = (sy / n) / H;
+
+  return {
+    x,
+    y,
+    px: x * video.videoWidth,
+    py: y * video.videoHeight,
+    r: Math.sqrt(n / Math.PI) * (video.videoWidth / W),
+    score: 0,
+    source: "warna"
+  };
+}
+
+// ===== PELACAK PERGELANGAN TANGAN (CADANGAN) =====
+
+// Memilih pergelangan yang paling aktif bergerak, lalu memakai
+// gerak naik turunnya sebagai sumber hitungan pantulan kedua.
+
+const wristHist = { 15: [], 16: [] };
+let wristIdx = null;
+
+function yRange(arr) {
+  return arr.length < 5 ? 0 : Math.max(...arr) - Math.min(...arr);
+}
+
+function trackWrist(lm, now) {
+
+  const cand = [15, 16].filter(i => visible(lm[i], 0.4));
+  if (!cand.length) return;
+
+  for (const i of cand) {
+    wristHist[i].push(lm[i].y);
+    if (wristHist[i].length > 30) wristHist[i].shift();
+  }
+
+  // Ganti pergelangan hanya jika yang lain jelas lebih aktif.
+  if (wristIdx === null || !cand.includes(wristIdx)) {
+    wristIdx = cand.reduce((a, b) =>
+      yRange(wristHist[b]) > yRange(wristHist[a]) ? b : a
+    );
+  } else {
+    const other = cand.find(i => i !== wristIdx);
+    if (
+      other !== undefined &&
+      yRange(wristHist[other]) > 1.5 * yRange(wristHist[wristIdx])
+    ) {
+      wristIdx = other;
+    }
+  }
+
+  wristRef = { x: lm[wristIdx].x, y: lm[wristIdx].y };
+
+  updateBounce(wristTr, lm[wristIdx].y, now);
+}
+
 // ===== PENGHITUNG PANTULAN =====
 
 // Titik kontak lantai = titik terendah bola di layar (nilai y terbesar).
@@ -478,16 +611,18 @@ function drawBall(ball) {
 // 3. amplitudo minimum,
 // 4. jeda minimum antar pantulan.
 
-function updateBounce(rawY, t) {
+function updateBounce(tr, rawY, t) {
 
   const scale = poseCtx.scale;
-  const h = 0.12 * scale;
-  const minAmp = 0.25 * scale;
+  const h = tr.hF * scale;
+  const minAmp = tr.aF * scale;
 
-  // Bola hilang terlalu lama: reset agar tidak ada pantulan palsu.
+  let bs = tr.bs;
+
+  // Sumber hilang terlalu lama: reset agar tidak ada pantulan palsu.
   if (t - bs.lastSeenT > MAX_GAP_MS) {
     const keepBounceT = bs.lastBounceT;
-    bs = newBallState();
+    bs = tr.bs = newBallState();
     bs.lastBounceT = keepBounceT;
   }
 
@@ -517,7 +652,6 @@ function updateBounce(rawY, t) {
 
   } else if (bs.dir === 1) {
 
-    // Bola turun, cari titik terendah.
     if (y > bs.extY) {
 
       bs.extY = y;
@@ -525,7 +659,6 @@ function updateBounce(rawY, t) {
 
     } else if (bs.extY - y > h) {
 
-      // Bola mulai naik: titik kontak ada di extY.
       const contactY = bs.extY;
       const topY = bs.lastTopY;
 
@@ -539,16 +672,17 @@ function updateBounce(rawY, t) {
 
         if (testActive) {
 
-          bounces.push({
+          tr.list.push({
             t: bs.extT,
             heightRel: (contactY - topY) / scale,
             low:
               poseCtx.hipY !== null
-                ? topY >= poseCtx.hipY
+                ? topY >= poseCtx.hipY - tr.lowTol * scale
                 : null
           });
 
-          bounceCountDisplay.textContent = bounces.length;
+          bounceCountDisplay.textContent =
+            ballTr.list.length + " / " + wristTr.list.length;
         }
       }
 
@@ -559,7 +693,6 @@ function updateBounce(rawY, t) {
 
   } else {
 
-    // Bola naik, cari titik tertinggi.
     if (y < bs.extY) {
 
       bs.extY = y;
@@ -613,8 +746,10 @@ function startTest() {
   if (!isRunning || testActive) return;
 
   testSamples = [];
-  bounces = [];
-  bs = newBallState();
+  ballTr.list = [];
+  wristTr.list = [];
+  ballTr.bs = newBallState();
+  wristTr.bs = newBallState();
   lastBall = null;
 
   testActive = true;
@@ -622,7 +757,7 @@ function startTest() {
 
   resultPanel.style.display = "none";
   startTestButton.disabled = true;
-  bounceCountDisplay.textContent = "0";
+  bounceCountDisplay.textContent = "0 / 0";
 
   liveTimerDisplay.textContent = "Durasi tes: 30 detik";
   statusBox.textContent = "Tes dimulai. Lakukan low dribbling di depan kamera.";
@@ -729,12 +864,19 @@ function finishTest() {
 
   liveTimerDisplay.textContent = "Durasi tes: selesai";
 
+  // Sumber pantulan: bola jika cakupannya cukup, jika tidak memakai tangan.
+  const ballOk =
+    ballCoverage >= MIN_BALL_COVERAGE &&
+    ballTr.list.length >= MIN_BOUNCES;
+  const wristOk = wristTr.list.length >= MIN_BOUNCES;
+  const useBall = ballOk;
+  const bounces = useBall ? ballTr.list : wristTr.list;
+
   if (
     testSamples.length < MIN_SAMPLES ||
     poseCoverage < MIN_POSE_COVERAGE ||
     handCoverage < MIN_HAND_COVERAGE ||
-    ballCoverage < MIN_BALL_COVERAGE ||
-    bounces.length < MIN_BOUNCES
+    (!ballOk && !wristOk)
   ) {
     showInvalid(
       "Tes belum valid: tubuh, tangan, atau bola terlalu sering tidak terbaca. Perbaiki posisi dan pencahayaan, lalu ulangi."
@@ -798,9 +940,23 @@ function finishTest() {
     tips.push("Pola dribbling yang terbaca sudah cukup baik dan konsisten. Pertahankan latihan.");
   }
 
+  const nb = ballTr.list.length;
+  const nw = wristTr.list.length;
+
+  const srcText = useBall
+    ? "dari bola"
+    : "dari gerak tangan karena bola kurang terbaca";
+
+  const warn =
+    nb && nw && Math.abs(nb - nw) / Math.max(nb, nw) > 0.25
+      ? " Peringatan: hitungan bola (" + nb + ") dan tangan (" + nw +
+        ") berbeda cukup jauh, periksa dengan video."
+      : "";
+
   $("feedbackText").textContent =
     "Umpan balik sistem: Terhitung " + bounces.length +
-    " pantulan dalam 30 detik. " + tips.join(" ");
+    " pantulan dalam 30 detik (" + srcText + ")." + warn + " " +
+    tips.join(" ");
 
   resultPanel.style.display = "block";
   statusBox.textContent = "Tes selesai. Skor analisis gerakan berhasil dihitung otomatis.";
@@ -900,7 +1056,8 @@ function renderLoop() {
 
       drawLandmarks(poseResult, handResult);
 
-      const ball = pickBall(ballResult, now);
+      let ball = pickBall(ballResult, now);
+      if (!ball) ball = findOrangeBall(now);
       if (ball) trackBall(ball, now);
 
       // Jika deteksi putus sebentar, posisi bola diperkirakan.
@@ -937,6 +1094,8 @@ function renderLoop() {
 
         if (measurements.torso) poseCtx.scale = measurements.torso;
 
+        trackWrist(lm, now);
+
       } else {
 
         leftKneeDisplay.textContent = "--";
@@ -964,11 +1123,12 @@ function renderLoop() {
       // ANALISIS BOLA DAN PANTULAN
 
       if (ball) {
-        ballStatusDisplay.textContent = "Terbaca";
-        updateBounce(ball.y, now);
+        ballStatusDisplay.textContent =
+          ball.source === "warna" ? "Warna" : "Terbaca";
+        updateBounce(ballTr, ball.y, now);
       } else if (est) {
         ballStatusDisplay.textContent = "Estimasi";
-        updateBounce(est.y, now);
+        updateBounce(ballTr, est.y, now);
       } else {
         ballStatusDisplay.textContent = "Hilang";
       }
